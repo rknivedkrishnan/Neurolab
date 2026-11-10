@@ -19,18 +19,18 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'NEUROLAB — Interactive Machine Learning Experience',
   description:
-    'Teach a machine. Watch it learn. An Apple-inspired interactive exhibition experience for drawing digits, inspecting a real 784-128-64-10 neural network, and teaching AI through live backpropagation.',
+    'Teach a machine. Watch it learn. An interactive machine learning exhibition experience for drawing digits, inspecting a real 784-128-64-10 neural network, and teaching AI through live backpropagation.',
   openGraph: {
     title: 'NEUROLAB — Interactive Machine Learning Experience',
     description:
-      'Teach a machine. Watch it learn. An Apple-inspired interactive exhibition experience for drawing digits, inspecting a real 784-128-64-10 neural network, and teaching AI through live backpropagation.',
+      'Teach a machine. Watch it learn. An interactive machine learning exhibition experience for drawing digits, inspecting a real 784-128-64-10 neural network, and teaching AI through live backpropagation.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'NEUROLAB — Interactive Machine Learning Experience',
     description:
-      'Teach a machine. Watch it learn. An Apple-inspired interactive exhibition experience for drawing digits, inspecting a real 784-128-64-10 neural network, and teaching AI through live backpropagation.',
+      'Teach a machine. Watch it learn. An interactive machine learning exhibition experience for drawing digits, inspecting a real 784-128-64-10 neural network, and teaching AI through live backpropagation.',
   },
 };
 

@@ -87,13 +87,13 @@ const GITHUB_BADGES: Array<{
 
 const RAW_GITHUB_README = `<div align="center">
 
-# 🧠 NEUROLAB — Interactive Machine Learning Experience
+# NEUROLAB — Interactive Machine Learning Experience
 
 ### **Teach a machine. Watch it learn.**
 
-*An Apple-inspired interactive science exhibition platform for exploring handwritten digit recognition, real-time neural network forward propagation, and live backpropagation training in the browser.*
+*An interactive science exhibition platform for exploring handwritten digit recognition, real-time neural network forward propagation, and live backpropagation training in the browser.*
 
-[![Live Website](https://img.shields.io/badge/🌐_Live_Website-neurolab--three.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://neurolab-three.vercel.app/)
+[![Live Website](https://img.shields.io/badge/Live_Website-neurolab--three.vercel.app-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://neurolab-three.vercel.app/)
 [![Status](https://img.shields.io/badge/Deployment-Production_Ready-10B981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://neurolab-three.vercel.app/)
 [![Next.js 15](https://img.shields.io/badge/Next.js_15-111111?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![React 19](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
@@ -105,9 +105,9 @@ const RAW_GITHUB_README = `<div align="center">
 [![Parameters](https://img.shields.io/badge/Learnable_Params-109,386-3478F6?style=for-the-badge)](https://neurolab-three.vercel.app/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-**🚀 Live Demo:** [**https://neurolab-three.vercel.app/**](https://neurolab-three.vercel.app/)
+**Live Demo:** [**https://neurolab-three.vercel.app/**](https://neurolab-three.vercel.app/)
 
-**✨ Made by R.K Nived Krishnan & Adithyan J ✨**
+**Made by R.K Nived Krishnan & Adithyan J**
 
 </div>`;
 
@@ -121,7 +121,7 @@ export default function AboutSection({
   const [copiedDesc, setCopiedDesc] = useState(false);
 
   const repoShortDescription =
-    'NEUROLAB — Teach a machine. Watch it learn. An Apple-inspired interactive machine learning exhibition app featuring a live 784→128→64→10 neural network, MNIST digit recognition, and real-time Adam backpropagation in the browser. Made by R.K Nived Krishnan & Adithyan J.';
+    'NEUROLAB — Teach a machine. Watch it learn. An interactive machine learning exhibition app featuring a live 784→128→64→10 neural network, MNIST digit recognition, and real-time Adam backpropagation in the browser. Made by R.K Nived Krishnan & Adithyan J.';
 
   const handleCopyCloneSnippet = () => {
     const snippet = `git clone https://github.com/neurolab-exhibit/neurolab.git\ncd neurolab && npm install && npm run dev`;
