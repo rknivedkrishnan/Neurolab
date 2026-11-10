@@ -812,21 +812,36 @@ export default function NeurolabApp() {
         )}
       </main>
 
-      {/* Quiet Exhibition Footer */}
-      <footer className="border-t border-[#E5E5E0] bg-[#FAFAF8] px-6 py-4 mt-12">
-        <div className="max-w-[1380px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs text-[#777777]">
-          <div>
-            <strong className="text-[#202124] font-semibold">NEUROLAB</strong> · Interactive Machine Learning Exhibition Experience
+      {/* Exhibition Footer & Creator Watermark */}
+      <footer className="border-t border-[#E5E5E0] bg-[#FAFAF8] px-6 py-6 mt-12">
+        <div className="max-w-[1380px] mx-auto flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-[#777777]">
+            <div>
+              <strong className="text-[#202124] font-semibold">NEUROLAB</strong> · Interactive Machine Learning Exhibition Experience
+            </div>
+            <div className="flex items-center gap-4">
+              <span>Architecture: 784 → 128 (ReLU) → 64 (ReLU) → 10 (Softmax)</span>
+              <button
+                type="button"
+                onClick={handleResetAll}
+                className="text-[#202124] hover:text-[#3478F6] font-medium underline cursor-pointer"
+              >
+                Reset Session for Next Visitor
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span>Architecture: 784 → 128 (ReLU) → 64 (ReLU) → 10 (Softmax)</span>
-            <button
-              type="button"
-              onClick={handleResetAll}
-              className="text-[#202124] hover:text-[#3478F6] font-medium underline cursor-pointer"
+
+          <div className="pt-4 border-t border-[#E5E5E0]/80 flex flex-col sm:flex-row items-center justify-between gap-3 pl-10 sm:pl-12">
+            <span className="text-[11px] font-mono text-[#777777]">
+              NEUROLAB Exhibition Build · Open-Source Educational AI
+            </span>
+            <div
+              data-testid="creator-watermark"
+              className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-lg bg-white border border-[#E5E5E0] text-xs font-semibold text-[#202124] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
             >
-              Reset Session for Next Visitor
-            </button>
+              <span className="w-2 h-2 rounded-full bg-[#3478F6]" />
+              <span>Made by R.K Nived Krishnan &amp; Adithyan J</span>
+            </div>
           </div>
         </div>
       </footer>

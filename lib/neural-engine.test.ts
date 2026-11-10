@@ -109,6 +109,42 @@ test('Expanded 1,000-example dataset (800 pretrained + 100 starter + 100 test) a
     countPredicted3OnNon3 <= 1,
     `Expected almost zero false '3' predictions on non-3 digits, got ${countPredicted3OnNon3}/${totalNon3}`
   );
+
+  // Verify digit 8 is recognized reliably across all 4 archetypes (figure-8, stacked ovals, S-curve, X-waist)
+  // and lookalike digits (0, 3, 6, 9) do not get confused with 8
+  let correct8 = 0;
+  const total8Tests = 8;
+  for (let v = 0; v < 4; v++) {
+    for (const thick of [1.05, 1.35]) {
+      const sample8 = synthesizeHandwrittenDigit(8, {
+        thickness: thick,
+        slant: (v - 1.5) * 0.05,
+        variant: v,
+      });
+      const res8 = forwardPass(sample8, pretrainedModel);
+      if (res8.predictedDigit === 8) correct8++;
+    }
+  }
+  assert.ok(
+    correct8 >= 7,
+    `Expected digit 8 recognition >= 7/8 across all archetypes, got ${correct8}/${total8Tests}`
+  );
+
+  for (const lookalike of [0, 3, 6, 9]) {
+    for (let v = 0; v < 4; v++) {
+      const sample = synthesizeHandwrittenDigit(lookalike, {
+        thickness: 1.2,
+        slant: 0.02,
+        variant: v,
+      });
+      const res = forwardPass(sample, pretrainedModel);
+      assert.equal(
+        res.predictedDigit,
+        lookalike,
+        `Expected lookalike digit ${lookalike} (variant ${v}) to be recognized as ${lookalike}, got ${res.predictedDigit}`
+      );
+    }
+  }
 });
 
 test('MNIST 28x28 center-of-mass preprocessing normalizes off-center drawings', () => {

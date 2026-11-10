@@ -94,10 +94,27 @@ export default function DrawingPad({
     const ctx = offscreen.getContext('2d');
     if (!ctx) return new Array(784).fill(0);
 
+    // Compute bounding box span of drawn points so stroke thickness in 28x28 space
+    // stays a crisp ~1.15px radius regardless of whether the visitor draws small or large
+    let minX = CANVAS_SIZE;
+    let maxX = 0;
+    let minY = CANVAS_SIZE;
+    let maxY = 0;
+    for (const stroke of allStrokes) {
+      for (const pt of stroke) {
+        if (pt.x < minX) minX = pt.x;
+        if (pt.x > maxX) maxX = pt.x;
+        if (pt.y < minY) minY = pt.y;
+        if (pt.y > maxY) maxY = pt.y;
+      }
+    }
+    const span = Math.max(55, maxX - minX, maxY - minY);
+    const adaptiveLineWidth = Math.max(10, Math.min(22, span * 0.115));
+
     const scale = 56 / CANVAS_SIZE;
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = '#000000';
-    ctx.lineWidth = 22 * scale;
+    ctx.lineWidth = adaptiveLineWidth * scale;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
@@ -105,7 +122,13 @@ export default function DrawingPad({
       if (stroke.length === 0) continue;
       if (stroke.length === 1) {
         ctx.beginPath();
-        ctx.arc(stroke[0].x * scale, stroke[0].y * scale, 11 * scale, 0, Math.PI * 2);
+        ctx.arc(
+          stroke[0].x * scale,
+          stroke[0].y * scale,
+          (adaptiveLineWidth / 2) * scale,
+          0,
+          Math.PI * 2
+        );
         ctx.fill();
         continue;
       }

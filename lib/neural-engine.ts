@@ -1378,34 +1378,42 @@ export function synthesizeHandwrittenDigit(
     }
     case 6: {
       if (v === 1) {
-        // Straight diagonal upper stem into round bottom loop
-        drawPolyline(
-          grid,
-          [
-            [0.28, -0.94],
-            [-0.58, 0.15],
-            [-0.58, 0.68],
-            [-0.02, 0.95],
-            [0.58, 0.68],
-            [0.58, 0.18],
-            [0.02, -0.04],
-            [-0.58, 0.22],
-          ],
-          fullStyle
-        );
+        // Straight diagonal upper stem from top-right into round bottom loop (top-right stays open)
+        const loopPts: Array<[number, number]> = [
+          [0.32, -0.94],
+          [-0.18, -0.45],
+          [-0.58, 0.15],
+        ];
+        for (let i = 0; i <= 12; i++) {
+          const ang = Math.PI + (i / 12) * Math.PI * 2;
+          loopPts.push([0.58 * Math.cos(ang), 0.46 + 0.46 * Math.sin(ang)]);
+        }
+        drawPolyline(grid, loopPts, fullStyle);
+      } else if (v === 2) {
+        // Curved C-back 6 with compact lower loop
+        const loopPts: Array<[number, number]> = [
+          [0.42, -0.9],
+          [-0.25, -0.62],
+          [-0.62, 0.05],
+        ];
+        for (let i = 0; i <= 12; i++) {
+          const ang = Math.PI + (i / 12) * Math.PI * 2;
+          loopPts.push([0.55 * Math.cos(ang), 0.48 + 0.44 * Math.sin(ang)]);
+        }
+        drawPolyline(grid, loopPts, fullStyle);
       } else {
         drawPolyline(
           grid,
           [
-            [0.38, -0.92],
-            [-0.25, -0.58],
+            [0.35, -0.92],
+            [-0.28, -0.58],
             [-0.62, 0.08],
             [-0.58, 0.68],
-            [-0.05, 0.95],
-            [0.55, 0.72],
-            [0.58, 0.22],
-            [0.05, -0.05],
-            [-0.58, 0.18],
+            [-0.04, 0.95],
+            [0.56, 0.72],
+            [0.56, 0.25],
+            [0.02, 0.04],
+            [-0.56, 0.24],
           ],
           fullStyle
         );
@@ -1460,103 +1468,110 @@ export function synthesizeHandwrittenDigit(
     }
     case 8: {
       if (v === 1) {
-        // Two stacked loops 8
+        // Archetype 1: Two distinct smooth stacked ovals touching at the waist (0, -0.02)
+        const topLoop: Array<[number, number]> = [];
+        const botLoop: Array<[number, number]> = [];
+        const steps = 16;
+        for (let i = 0; i <= steps; i++) {
+          const ang = (i / steps) * Math.PI * 2;
+          topLoop.push([0.56 * Math.cos(ang), -0.48 + 0.44 * Math.sin(ang)]);
+          botLoop.push([0.64 * Math.cos(ang), 0.48 + 0.45 * Math.sin(ang)]);
+        }
+        drawPolyline(grid, topLoop, fullStyle);
+        drawPolyline(grid, botLoop, fullStyle);
+      } else if (v === 2) {
+        // Archetype 2: Smooth parametric Lemniscate / S-curve figure-8 (starts top center, traces full figure-8)
+        const pts: Array<[number, number]> = [];
+        const steps = 28;
+        for (let i = 0; i <= steps; i++) {
+          const t = (i / steps) * Math.PI * 2;
+          // Parametric figure-8: x = rx * sin(2t), y = -ry * cos(t)
+          // At t=0: (0, -0.93) top; t=pi/2: (0, 0) center waist; t=pi: (0, +0.93) bottom; t=3pi/2: (0, 0) waist
+          const rx = Math.cos(t) < 0 ? 0.65 : 0.58; // slightly wider bottom loop
+          pts.push([rx * Math.sin(2 * t), -0.93 * Math.cos(t)]);
+        }
+        drawPolyline(grid, pts, fullStyle);
+      } else if (v === 3) {
+        // Archetype 3: Quick handwritten figure-8 starting top-right with crisp diagonal X-waist
         drawPolyline(
           grid,
           [
-            [0.0, -0.94],
-            [-0.54, -0.72],
-            [-0.52, -0.25],
-            [0.0, -0.04],
-            [0.52, -0.25],
-            [0.54, -0.72],
-            [0.0, -0.94],
-          ],
-          fullStyle
-        );
-        drawPolyline(
-          grid,
-          [
-            [0.0, -0.04],
-            [-0.62, 0.25],
-            [-0.6, 0.76],
+            [0.35, -0.88],
+            [0.0, -0.95],
+            [-0.56, -0.76],
+            [-0.58, -0.32],
+            [0.0, 0.0],
+            [0.64, 0.34],
+            [0.62, 0.78],
             [0.0, 0.95],
-            [0.6, 0.76],
-            [0.62, 0.25],
-            [0.0, -0.04],
+            [-0.62, 0.78],
+            [-0.64, 0.34],
+            [0.0, 0.0],
+            [0.58, -0.32],
+            [0.56, -0.76],
+            [0.0, -0.95],
           ],
           fullStyle
         );
       } else {
-        // Continuous figure-8
-        drawPolyline(
-          grid,
-          [
-            [0.0, -0.02],
-            [-0.55, -0.35],
-            [-0.52, -0.75],
-            [0.0, -0.95],
-            [0.52, -0.75],
-            [0.55, -0.35],
-            [0.0, -0.02],
-            [-0.62, 0.35],
-            [-0.58, 0.78],
-            [0.0, 0.95],
-            [0.58, 0.78],
-            [0.62, 0.35],
-            [0.0, -0.02],
-          ],
-          fullStyle
-        );
+        // Archetype 0: Balanced continuous figure-8 with wide open upper and lower holes
+        const pts: Array<[number, number]> = [];
+        const steps = 28;
+        for (let i = 0; i <= steps; i++) {
+          const t = (i / steps) * Math.PI * 2;
+          pts.push([0.61 * Math.sin(2 * t), -0.92 * Math.cos(t)]);
+        }
+        drawPolyline(grid, pts, fullStyle);
       }
       break;
     }
     case 9: {
       if (v === 1) {
-        // 9 with straight vertical right stem
+        // 9 with round upper loop and straight vertical right stem (bottom-left stays open)
+        const pts: Array<[number, number]> = [];
+        for (let i = 0; i <= 12; i++) {
+          const ang = (i / 12) * Math.PI * 2;
+          pts.push([0.56 * Math.cos(ang), -0.48 + 0.44 * Math.sin(ang)]);
+        }
+        drawPolyline(grid, pts, fullStyle);
         drawPolyline(
           grid,
           [
-            [0.56, -0.22],
-            [0.0, 0.04],
-            [-0.56, -0.22],
-            [-0.56, -0.7],
-            [0.0, -0.94],
-            [0.56, -0.7],
+            [0.56, -0.48],
             [0.56, 0.95],
           ],
           fullStyle
         );
       } else if (v === 2) {
-        // 9 with curved bottom hook
+        // 9 with upper loop and gentle bottom hook
         drawPolyline(
           grid,
           [
-            [0.56, -0.2],
-            [-0.02, 0.05],
-            [-0.58, -0.2],
-            [-0.58, -0.68],
+            [0.56, -0.25],
+            [-0.02, -0.02],
+            [-0.58, -0.25],
+            [-0.58, -0.7],
             [-0.02, -0.94],
-            [0.56, -0.68],
-            [0.56, 0.55],
-            [0.2, 0.94],
-            [-0.35, 0.85],
+            [0.56, -0.7],
+            [0.56, 0.62],
+            [0.24, 0.94],
+            [-0.22, 0.88],
           ],
           fullStyle
         );
       } else {
-        // Slanted-stem 9
+        // Slanted-stem 9 (bottom-left stays open)
         drawPolyline(
           grid,
           [
-            [0.55, -0.15],
-            [-0.05, 0.08],
-            [-0.58, -0.18],
-            [-0.58, -0.68],
+            [0.55, -0.22],
+            [-0.04, 0.0],
+            [-0.58, -0.22],
+            [-0.58, -0.7],
             [-0.02, -0.94],
-            [0.56, -0.68],
+            [0.56, -0.7],
             [0.58, 0.12],
-            [0.18, 0.95],
+            [0.22, 0.95],
           ],
           fullStyle
         );
@@ -1578,17 +1593,17 @@ export function generateAdditionalTrainingExamples(
 ): LabeledDigitExample[] {
   const rng = createSeededRng(seedOffset);
   const batch: LabeledDigitExample[] = [];
-  const thicknesses = [0.95, 1.15, 1.35, 1.55, 1.75];
+  const thicknesses = [0.9, 1.08, 1.24, 1.4, 1.56];
 
   for (let d = 0; d <= 9; d++) {
     for (let i = 0; i < countPerDigit; i++) {
       const style: DigitStyleVariation = {
         thickness: thicknesses[i % thicknesses.length],
-        slant: (rng() - 0.5) * 0.32,
-        scaleX: 0.84 + rng() * 0.32,
+        slant: (rng() - 0.5) * 0.3,
+        scaleX: 0.85 + rng() * 0.3,
         scaleY: 0.86 + rng() * 0.28,
-        offsetX: (rng() - 0.5) * 1.6,
-        offsetY: (rng() - 0.5) * 1.6,
+        offsetX: (rng() - 0.5) * 1.5,
+        offsetY: (rng() - 0.5) * 1.5,
         variant: i % 4,
       };
       batch.push({
@@ -1618,7 +1633,8 @@ export function buildInitialDatasets(): {
   const visitorStarterSet: LabeledDigitExample[] = [];
   const testDataset: LabeledDigitExample[] = [];
 
-  const thicknesses = [0.95, 1.15, 1.35, 1.55, 1.75];
+  // Calibrated stroke thicknesses so double-loop digits like '8' keep crisp open loop interiors
+  const thicknesses = [0.9, 1.08, 1.24, 1.4, 1.56];
   const slants = [-0.18, -0.09, 0.0, 0.09, 0.18];
 
   // 80 variations per digit (800 total!) for the Pretrained Reference Model
@@ -1631,8 +1647,8 @@ export function buildInitialDatasets(): {
       const style: DigitStyleVariation = {
         thickness: thick,
         slant,
-        scaleX: 0.85 + rng() * 0.3,
-        scaleY: 0.86 + rng() * 0.28,
+        scaleX: 0.86 + rng() * 0.28,
+        scaleY: 0.87 + rng() * 0.26,
         offsetX: (rng() - 0.5) * 1.4,
         offsetY: (rng() - 0.5) * 1.4,
         variant: archetype,
@@ -1649,7 +1665,6 @@ export function buildInitialDatasets(): {
   }
 
   // 10 starter examples per digit (100 total) for the Visitor-Trainable Model
-  // Covers multiple archetypes so it starts with balanced (~78-84%) recognition and can be trained higher!
   for (let d = 0; d <= 9; d++) {
     for (let v = 0; v < 10; v++) {
       const pixels = synthesizeHandwrittenDigit(d, {
@@ -1675,8 +1690,8 @@ export function buildInitialDatasets(): {
   for (let d = 0; d <= 9; d++) {
     for (let t = 0; t < 10; t++) {
       const pixels = synthesizeHandwrittenDigit(d, {
-        thickness: 1.0 + (t % 4) * 0.22,
-        slant: ((t % 5) - 2) * 0.085,
+        thickness: 0.95 + (t % 4) * 0.18,
+        slant: ((t % 5) - 2) * 0.08,
         scaleX: 0.88 + (t % 4) * 0.08,
         scaleY: 0.9 + ((t + 2) % 4) * 0.07,
         offsetX: ((t % 3) - 1) * 0.6,
@@ -1710,13 +1725,12 @@ export function initializeNeurolabModels(): {
   // 1. Pretrained Reference Model: trained with shuffled mini-batches on 800 diverse examples
   const pretrainedModel = createNeuralNetwork('Pretrained MNIST Reference Model', 2026);
   trainNetworkOnBatch(pretrainedModel, pretrainedTrainingSet, {
-    epochs: 5,
+    epochs: 6,
     learningRate: 0.006,
     batchSize: 50,
   });
 
   // 2. Visitor-Trainable Model: initialized with 2 mini-batch epochs on the 100-example starter set
-  // so it starts with solid ~78-85% accuracy across all digits (no digit-3 bias!) and improves to >95% as visitors teach it.
   const visitorModel = createNeuralNetwork('Visitor-Trainable Neural Network', 7777);
   trainNetworkOnBatch(visitorModel, visitorStarterSet, {
     epochs: 2,
