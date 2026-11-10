@@ -3,6 +3,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Eraser, Undo2, Sparkles, Grid, Eye } from 'lucide-react';
 import { normalizeGridToMNIST28x28, synthesizeHandwrittenDigit } from '@/lib/neural-engine';
+import { useTheme } from './ThemeProvider';
 
 interface Point {
   x: number;
@@ -22,6 +23,7 @@ export default function DrawingPad({
   onPixelsChange,
   onRecognize,
 }: DrawingPadProps) {
+  const { isDark } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [strokes, setStrokes] = useState<Point[][]>([]);
   const currentStrokeRef = useRef<Point[]>([]);
@@ -32,58 +34,98 @@ export default function DrawingPad({
   );
   const [hasDrawnFreehand, setHasDrawnFreehand] = useState(false);
 
-  // Render strokes onto the 280x280 drawing canvas
-  const redrawCanvas = useCallback((allStrokes: Point[][], activeStroke: Point[] = []) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // Render strokes onto the 280x280 drawing canvas (adapting ink & guide colors to Light/Dark theme)
+  const redrawCanvas = useCallback(
+    (allStrokes: Point[][], activeStroke: Point[] = []) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
-    // Subtle guide crosshair & safe drawing zone
-    ctx.strokeStyle = '#ECECE8';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.strokeRect(36, 36, CANVAS_SIZE - 72, CANVAS_SIZE - 72);
-    ctx.beginPath();
-    ctx.moveTo(CANVAS_SIZE / 2, 24);
-    ctx.lineTo(CANVAS_SIZE / 2, CANVAS_SIZE - 24);
-    ctx.moveTo(24, CANVAS_SIZE / 2);
-    ctx.lineTo(CANVAS_SIZE - 24, CANVAS_SIZE / 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Draw smooth dark charcoal strokes
-    const toDraw = [...allStrokes, ...(activeStroke.length > 0 ? [activeStroke] : [])];
-    ctx.strokeStyle = '#202124';
-    ctx.fillStyle = '#202124';
-    ctx.lineWidth = 22;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    for (const stroke of toDraw) {
-      if (stroke.length === 0) continue;
-      if (stroke.length === 1) {
-        ctx.beginPath();
-        ctx.arc(stroke[0].x, stroke[0].y, 11, 0, Math.PI * 2);
-        ctx.fill();
-        continue;
-      }
+      // Subtle guide crosshair & safe drawing zone
+      ctx.strokeStyle = isDark ? '#203653' : '#ECECE8';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(36, 36, CANVAS_SIZE - 72, CANVAS_SIZE - 72);
       ctx.beginPath();
-      ctx.moveTo(stroke[0].x, stroke[0].y);
-      for (let i = 1; i < stroke.length; i++) {
-        const midX = (stroke[i - 1].x + stroke[i].x) / 2;
-        const midY = (stroke[i - 1].y + stroke[i].y) / 2;
-        ctx.quadraticCurveTo(stroke[i - 1].x, stroke[i - 1].y, midX, midY);
-      }
-      const last = stroke[stroke.length - 1];
-      ctx.lineTo(last.x, last.y);
+      ctx.moveTo(CANVAS_SIZE / 2, 24);
+      ctx.lineTo(CANVAS_SIZE / 2, CANVAS_SIZE - 24);
+      ctx.moveTo(24, CANVAS_SIZE / 2);
+      ctx.lineTo(CANVAS_SIZE - 24, CANVAS_SIZE / 2);
       ctx.stroke();
-    }
-  }, []);
+      ctx.setLineDash([]);
 
-  // Extract 28x28 normalized grayscale pixels from current strokes
+      // Draw smooth strokes
+      const toDraw = [...allStrokes, ...(activeStroke.length > 0 ? [activeStroke] : [])];
+      ctx.save();
+      ctx.strokeStyle = isDark ? '#F1F6FF' : '#202124';
+      ctx.fillStyle = isDark ? '#F1F6FF' : '#202124';
+      if (isDark) {
+        ctx.shadowColor = 'rgba(53, 216, 242, 0.45)';
+        ctx.shadowBlur = 8;
+      }
+      ctx.lineWidth = 22;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      for (const stroke of toDraw) {
+        if (stroke.length === 0) continue;
+        if (stroke.length === 1) {
+          ctx.beginPath();
+          ctx.arc(stroke[0].x, stroke[0].y, 11, 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
+        ctx.beginPath();
+        ctx.moveTo(stroke[0].x, stroke[0].y);
+        for (let i = 1; i < stroke.length; i++) {
+          const midX = (stroke[i - 1].x + stroke[i].x) / 2;
+          const midY = (stroke[i - 1].y + stroke[i].y) / 2;
+          ctx.quadraticCurveTo(stroke[i - 1].x, stroke[i - 1].y, midX, midY);
+        }
+        const last = stroke[stroke.length - 1];
+        ctx.lineTo(last.x, last.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Paint 28x28 preview onto main canvas when a sample digit is active and no freehand strokes exist
+      if (
+        allStrokes.length === 0 &&
+        activeStroke.length === 0 &&
+        !hasDrawnFreehand &&
+        pixels28x28.some((v) => v > 0.05)
+      ) {
+        const cell = CANVAS_SIZE / 28;
+        for (let r = 0; r < 28; r++) {
+          for (let c = 0; c < 28; c++) {
+            const v = pixels28x28[r * 28 + c];
+            if (v > 0.04) {
+              ctx.fillStyle = isDark
+                ? v > 0.6
+                  ? `rgba(241, 246, 255, ${Math.min(1, v * 0.96)})`
+                  : `rgba(53, 216, 242, ${Math.min(0.9, v * 0.85)})`
+                : `rgba(32, 33, 36, ${Math.min(1, v * 0.95)})`;
+              ctx.beginPath();
+              ctx.arc(
+                c * cell + cell / 2,
+                r * cell + cell / 2,
+                (cell / 2) * 1.15,
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+            }
+          }
+        }
+      }
+    },
+    [isDark, hasDrawnFreehand, pixels28x28]
+  );
+
+  // Extract 28x28 normalized grayscale pixels from current strokes (theme-independent math)
   const extract28x28FromStrokes = useCallback((allStrokes: Point[][]): number[] => {
     if (allStrokes.length === 0) {
       return new Array(784).fill(0);
@@ -94,8 +136,6 @@ export default function DrawingPad({
     const ctx = offscreen.getContext('2d');
     if (!ctx) return new Array(784).fill(0);
 
-    // Compute bounding box span of drawn points so stroke thickness in 28x28 space
-    // stays a crisp ~1.15px radius regardless of whether the visitor draws small or large
     let minX = CANVAS_SIZE;
     let maxX = 0;
     let minY = CANVAS_SIZE;
@@ -161,36 +201,6 @@ export default function DrawingPad({
   useEffect(() => {
     redrawCanvas(strokes);
   }, [strokes, redrawCanvas]);
-
-  // Also paint 28x28 preview onto main canvas when sample digit is selected and no freehand strokes exist
-  useEffect(() => {
-    if (strokes.length === 0 && !hasDrawnFreehand && pixels28x28.some((v) => v > 0.05)) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      redrawCanvas([]);
-      const cell = CANVAS_SIZE / 28;
-      for (let r = 0; r < 28; r++) {
-        for (let c = 0; c < 28; c++) {
-          const v = pixels28x28[r * 28 + c];
-          if (v > 0.04) {
-            ctx.fillStyle = `rgba(32, 33, 36, ${Math.min(1, v * 0.95)})`;
-            ctx.beginPath();
-            ctx.arc(
-              c * cell + cell / 2,
-              r * cell + cell / 2,
-              (cell / 2) * 1.15,
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
-          }
-        }
-      }
-    }
-  }, [pixels28x28, strokes.length, hasDrawnFreehand, redrawCanvas]);
 
   const getPointerPos = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -290,7 +300,7 @@ export default function DrawingPad({
             onClick={handleUndo}
             disabled={strokes.length === 0}
             aria-label="Undo last stroke"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-[#E5E5E0] text-[#202124] bg-[#FAFAF8] hover:bg-[#F2F2EF] disabled:opacity-40 disabled:pointer-events-none transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-[#E5E5E0] text-[#202124] bg-[#FAFAF8] hover:bg-[#F2F2EF] disabled:opacity-40 disabled:pointer-events-none transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Undo2 className="w-3.5 h-3.5" />
             Undo
@@ -299,7 +309,7 @@ export default function DrawingPad({
             type="button"
             onClick={handleClear}
             aria-label="Clear drawing canvas"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-[#E5E5E0] text-[#202124] bg-[#FAFAF8] hover:bg-[#F2F2EF] transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-[#E5E5E0] text-[#202124] bg-[#FAFAF8] hover:bg-[#F2F2EF] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Eraser className="w-3.5 h-3.5" />
             Clear
@@ -311,7 +321,13 @@ export default function DrawingPad({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 items-stretch">
         {/* Interactive Canvas Column */}
         <div className="flex flex-col items-center justify-between bg-[#FAFAF8] rounded-xl border border-[#E5E5E0] p-4">
-          <div className="relative w-full max-w-[240px] aspect-square bg-white rounded-xl border border-[#E5E5E0] overflow-hidden shadow-2xs touch-none">
+          <div
+            className={`relative w-full max-w-[240px] aspect-square rounded-xl border overflow-hidden shadow-2xs touch-none ${
+              isDark
+                ? 'bg-[#09172B] border-[#29476A] shadow-[inset_0_0_24px_rgba(5,11,24,0.65)]'
+                : 'bg-white border-[#E5E5E0]'
+            }`}
+          >
             <canvas
               ref={canvasRef}
               width={CANVAS_SIZE}
@@ -327,7 +343,11 @@ export default function DrawingPad({
             />
             {activePixelsCount === 0 && (
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center p-4">
-                <span className="text-4xl font-semibold text-[#202124]/15 select-none">
+                <span
+                  className={`text-4xl font-semibold select-none ${
+                    isDark ? 'text-[#7186A6]/35' : 'text-[#202124]/15'
+                  }`}
+                >
                   0 – 9
                 </span>
                 <span className="text-xs text-[#777777] mt-1">
@@ -384,7 +404,9 @@ export default function DrawingPad({
 
           {/* 28x28 Interactive Grid */}
           <div
-            className="w-full max-w-[216px] mx-auto aspect-square bg-white rounded-lg border border-[#E5E5E0] p-1 grid"
+            className={`w-full max-w-[216px] mx-auto aspect-square rounded-lg border p-1 grid ${
+              isDark ? 'bg-[#09172B] border-[#29476A]' : 'bg-white border-[#E5E5E0]'
+            }`}
             style={{
               gridTemplateColumns: 'repeat(28, minmax(0, 1fr))',
               gridTemplateRows: 'repeat(28, minmax(0, 1fr))',
@@ -395,18 +417,26 @@ export default function DrawingPad({
               const r = Math.floor(idx / 28);
               const c = idx % 28;
               const active = val > 0.04;
+              const cellBg = active
+                ? isDark
+                  ? val > 0.65
+                    ? `rgba(53, 216, 242, ${Math.min(1, val)})`
+                    : `rgba(37, 139, 255, ${Math.max(0.18, val)})`
+                  : `rgba(52, 120, 246, ${Math.max(0.12, val)})`
+                : isDark
+                ? idx % 2 === 0
+                  ? '#09172B'
+                  : '#0B1B32'
+                : idx % 2 === 0
+                ? '#FFFFFF'
+                : '#FAFAF8';
+
               return (
                 <div
                   key={idx}
                   onMouseEnter={() => setHoveredCell({ r, c, val })}
                   className="relative flex items-center justify-center select-none overflow-hidden"
-                  style={{
-                    backgroundColor: active
-                      ? `rgba(52, 120, 246, ${Math.max(0.12, val)})`
-                      : idx % 2 === 0
-                      ? '#FFFFFF'
-                      : '#FAFAF8',
-                  }}
+                  style={{ backgroundColor: cellBg }}
                 >
                   {showNumbersInGrid && val >= 0.15 && (
                     <span className="text-[5px] leading-none font-mono text-white font-semibold tabular-nums">

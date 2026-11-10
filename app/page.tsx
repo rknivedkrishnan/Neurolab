@@ -10,6 +10,8 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import {
   initializeNeurolabModels,
@@ -29,6 +31,8 @@ import HowItWorksSection from '@/components/HowItWorksSection';
 import TeachAiSection from '@/components/TeachAiSection';
 import LearningProgressSection from '@/components/LearningProgressSection';
 import AboutSection from '@/components/AboutSection';
+import { useTheme } from '@/components/ThemeProvider';
+import AmbientDarkBackground from '@/components/AmbientDarkBackground';
 
 type NavSection = 'explore' | 'how-it-works' | 'teach' | 'progress' | 'about';
 
@@ -36,6 +40,7 @@ const STORAGE_KEY_SESSIONS = 'neurolab_exhibition_sessions_v1';
 const STORAGE_KEY_VISITOR_EXAMPLES = 'neurolab_visitor_examples_v1';
 
 export default function NeurolabApp() {
+  const { isDark, toggleTheme } = useTheme();
   const [activeNav, setActiveNav] = useState<NavSection>('explore');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -296,9 +301,16 @@ export default function NeurolabApp() {
   const hasInk = currentPixels.some((p) => p > 0.08);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAFAF8] text-[#202124]">
-      {/* Strict 3-Zone Top Navigation Bar (Frontend Design Top Bar Contract) */}
-      <header className="sticky top-0 z-30 bg-[#FAFAF8]/95 backdrop-blur-xs border-b border-[#E5E5E0] px-6 py-4 flex items-center justify-between gap-8">
+    <div
+      className={`min-h-screen flex flex-col relative ${
+        isDark ? 'bg-transparent text-[#F1F6FF]' : 'bg-[#FAFAF8] text-[#202124]'
+      }`}
+    >
+      {/* Animated Live-Wallpaper Background (Active in Dark Mode) */}
+      <AmbientDarkBackground />
+
+      {/* Strict 3-Zone Top Navigation Bar */}
+      <header className="sticky top-0 z-30 bg-[#FAFAF8]/95 backdrop-blur-md border-b border-[#E5E5E0] px-4 sm:px-6 py-4 flex items-center justify-between gap-4 sm:gap-8">
         {/* Zone 1: Brand Wordmark */}
         <button
           type="button"
@@ -311,7 +323,7 @@ export default function NeurolabApp() {
         {/* Zone 2: 5 Concise Single-Line Navigation Links */}
         <nav
           aria-label="Main Navigation"
-          className="flex items-center gap-5 sm:gap-7 overflow-x-auto text-sm font-medium text-[#777777]"
+          className="flex items-center gap-4 sm:gap-7 overflow-x-auto text-sm font-medium text-[#777777]"
         >
           {[
             { id: 'explore', label: 'Explore' },
@@ -338,22 +350,53 @@ export default function NeurolabApp() {
           })}
         </nav>
 
-        {/* Zone 3: 1 Primary Action Button */}
-        <div className="flex items-center shrink-0">
+        {/* Zone 3: Theme Toggle + Exhibition Mode */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="relative group">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              data-testid="theme-toggle"
+              aria-label={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+              className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#258BFF]/50 ${
+                isDark
+                  ? 'bg-[#122440] border-[#29476A] text-[#35D8F2] hover:bg-[#193156] hover:border-[#35D8F2]/60 shadow-[0_0_14px_rgba(53,216,242,0.18)]'
+                  : 'bg-white border-[#E5E5E0] text-[#202124] hover:bg-[#F2F2EF]'
+              }`}
+            >
+              {isDark ? (
+                <Sun className="w-4 h-4 transition-transform duration-300 rotate-0 scale-100" />
+              ) : (
+                <Moon className="w-4 h-4 transition-transform duration-300 rotate-0 scale-100" />
+              )}
+            </button>
+            <span
+              role="tooltip"
+              className={`pointer-events-none absolute right-0 top-full mt-2 px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 border shadow-md z-40 ${
+                isDark
+                  ? 'bg-[#122440] border-[#29476A] text-[#F1F6FF]'
+                  : 'bg-[#202124] border-[#202124] text-white'
+              }`}
+            >
+              {isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            </span>
+          </div>
+
           <button
             type="button"
             onClick={toggleExhibitionFullscreen}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-[#202124] hover:bg-[#333438] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs font-medium text-white bg-[#202124] hover:bg-[#333438] rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             {isFullscreen ? (
               <>
                 <Minimize2 className="w-3.5 h-3.5" />
-                Exit Fullscreen
+                <span className="hidden sm:inline">Exit Fullscreen</span>
               </>
             ) : (
               <>
                 <Maximize2 className="w-3.5 h-3.5" />
-                Exhibition Mode
+                <span className="hidden sm:inline">Exhibition Mode</span>
               </>
             )}
           </button>
@@ -361,7 +404,7 @@ export default function NeurolabApp() {
       </header>
 
       {/* Main Content Container */}
-      <main className="flex-1 max-w-[1380px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <main className="relative z-10 flex-1 max-w-[1380px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {activeNav === 'explore' && (
           <div className="space-y-6">
             {/* Compact Exhibition Hero & 4-Stage Connected Progress Bar */}
@@ -509,7 +552,13 @@ export default function NeurolabApp() {
                             <div className="flex-1 h-2.5 bg-[#E5E5E0]/70 rounded-full overflow-hidden">
                               <div
                                 className={`h-full rounded-full transition-all duration-300 ${
-                                  isWinner ? 'bg-[#3478F6]' : 'bg-[#777777]/45'
+                                  isWinner
+                                    ? isDark
+                                      ? 'bg-gradient-to-r from-[#258BFF] to-[#35D8F2] shadow-[0_0_10px_rgba(53,216,242,0.45)]'
+                                      : 'bg-[#3478F6]'
+                                    : isDark
+                                    ? 'bg-[#7186A6]/45'
+                                    : 'bg-[#777777]/45'
                                 }`}
                                 style={{ width: `${Math.max(pct, 1.5)}%` }}
                               />
@@ -813,7 +862,7 @@ export default function NeurolabApp() {
       </main>
 
       {/* Exhibition Footer & Creator Watermark */}
-      <footer className="border-t border-[#E5E5E0] bg-[#FAFAF8] px-6 py-6 mt-12">
+      <footer className="relative z-10 border-t border-[#E5E5E0] bg-[#FAFAF8]/95 backdrop-blur-md px-6 py-6 mt-12">
         <div className="max-w-[1380px] mx-auto flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-[#777777]">
             <div>

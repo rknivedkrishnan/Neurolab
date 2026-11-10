@@ -8,6 +8,7 @@ import {
   buildNetworkVisualizationSnapshot,
   VisualNode,
 } from '@/lib/neural-engine';
+import { useTheme } from './ThemeProvider';
 
 interface NeuralNetworkVizProps {
   activations: LayerActivations;
@@ -55,6 +56,7 @@ export default function NeuralNetworkViz({
   onModelModeChange,
   animationTrigger,
 }: NeuralNetworkVizProps) {
+  const { isDark } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentStage, setCurrentStage] = useState<number>(4); // 1..4
@@ -156,10 +158,16 @@ export default function NeuralNetworkViz({
     headers.forEach((h, idx) => {
       const isStageActive = currentStage >= idx + 1;
       ctx.font = '600 12px sans-serif';
-      ctx.fillStyle = isStageActive ? '#202124' : '#777777';
+      ctx.fillStyle = isDark
+        ? isStageActive
+          ? '#F1F6FF'
+          : '#A2B5D0'
+        : isStageActive
+        ? '#202124'
+        : '#777777';
       ctx.fillText(h.label, layerX[idx], 18);
       ctx.font = '400 10px sans-serif';
-      ctx.fillStyle = '#777777';
+      ctx.fillStyle = isDark ? '#7186A6' : '#777777';
       ctx.fillText(h.sub, layerX[idx], 32);
     });
 
@@ -180,7 +188,6 @@ export default function NeuralNetworkViz({
       const p1 = getNodeCoords(syn.fromLayer, syn.fromVisualIndex, fromNodes.length);
       const p2 = getNodeCoords(syn.toLayer, syn.toVisualIndex, toNodes.length);
 
-      // Determine if signal has reached this synapse segment
       const segStart = syn.fromLayer * 0.28;
       const segProgress = Math.max(0, Math.min(1, (progress - segStart) / 0.32));
 
@@ -188,7 +195,6 @@ export default function NeuralNetworkViz({
         syn.fromLayer === 0 ? maxSig01 : syn.fromLayer === 1 ? maxSig12 : maxSig23;
       const relStrength = syn.signalStrength / layerMax;
 
-      // Filter weak connections so the diagram remains clean and legible
       if (relStrength < 0.16) continue;
 
       const isWinningOutputSynapse =
@@ -198,22 +204,35 @@ export default function NeuralNetworkViz({
 
       const alpha =
         segProgress > 0
-          ? Math.min(0.82, (0.14 + relStrength * 0.65) * segProgress)
-          : 0.06;
+          ? Math.min(0.84, (0.14 + relStrength * 0.65) * segProgress)
+          : 0.07;
 
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
       ctx.lineTo(p2.x, p2.y);
 
-      if (isWinningOutputSynapse) {
-        ctx.strokeStyle = `rgba(52, 120, 246, ${Math.max(0.42, alpha)})`;
-        ctx.lineWidth = Math.min(2.8, 1.1 + relStrength * 1.8);
-      } else if (syn.isPositive) {
-        ctx.strokeStyle = `rgba(52, 120, 246, ${alpha})`;
-        ctx.lineWidth = Math.min(2.2, 0.7 + relStrength * 1.4);
+      if (isDark) {
+        if (isWinningOutputSynapse) {
+          ctx.strokeStyle = `rgba(53, 216, 242, ${Math.max(0.48, alpha)})`;
+          ctx.lineWidth = Math.min(2.8, 1.1 + relStrength * 1.8);
+        } else if (syn.isPositive) {
+          ctx.strokeStyle = `rgba(37, 139, 255, ${alpha})`;
+          ctx.lineWidth = Math.min(2.2, 0.7 + relStrength * 1.4);
+        } else {
+          ctx.strokeStyle = `rgba(116, 91, 255, ${alpha * 0.92})`;
+          ctx.lineWidth = Math.min(1.9, 0.6 + relStrength * 1.2);
+        }
       } else {
-        ctx.strokeStyle = `rgba(88, 86, 214, ${alpha * 0.9})`;
-        ctx.lineWidth = Math.min(1.9, 0.6 + relStrength * 1.2);
+        if (isWinningOutputSynapse) {
+          ctx.strokeStyle = `rgba(52, 120, 246, ${Math.max(0.42, alpha)})`;
+          ctx.lineWidth = Math.min(2.8, 1.1 + relStrength * 1.8);
+        } else if (syn.isPositive) {
+          ctx.strokeStyle = `rgba(52, 120, 246, ${alpha})`;
+          ctx.lineWidth = Math.min(2.2, 0.7 + relStrength * 1.4);
+        } else {
+          ctx.strokeStyle = `rgba(88, 86, 214, ${alpha * 0.9})`;
+          ctx.lineWidth = Math.min(1.9, 0.6 + relStrength * 1.2);
+        }
       }
       ctx.stroke();
 
@@ -223,7 +242,13 @@ export default function NeuralNetworkViz({
         const py = p1.y + (p2.y - p1.y) * segProgress;
         ctx.beginPath();
         ctx.arc(px, py, 2.8, 0, Math.PI * 2);
-        ctx.fillStyle = syn.isPositive ? '#3478F6' : '#5856D6';
+        ctx.fillStyle = isDark
+          ? syn.isPositive
+            ? '#35D8F2'
+            : '#745BFF'
+          : syn.isPositive
+          ? '#3478F6'
+          : '#5856D6';
         ctx.fill();
       }
     }
@@ -238,52 +263,100 @@ export default function NeuralNetworkViz({
         const isPredictedOutput =
           layerIdx === 3 && node.realIndex === activations.predictedDigit && layerReached;
 
+        // Subtle outer glow around strong active neurons in Dark Mode
+        if (isDark && (isPredictedOutput || act > 0.45)) {
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = isPredictedOutput
+            ? 'rgba(53, 216, 242, 0.22)'
+            : layerIdx === 2
+            ? 'rgba(116, 91, 255, 0.16)'
+            : 'rgba(37, 139, 255, 0.16)';
+          ctx.fill();
+        }
+
         // Node circle fill
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
 
-        if (isPredictedOutput) {
-          ctx.fillStyle = '#3478F6';
-        } else if (act > 0.06) {
-          // Interpolate between warm white and restrained electric blue / soft indigo
-          const tint = Math.min(1, Math.pow(act, 0.75) * 0.95);
-          ctx.fillStyle =
-            layerIdx === 2
-              ? `rgba(88, 86, 214, ${0.18 + tint * 0.78})`
-              : `rgba(52, 120, 246, ${0.18 + tint * 0.78})`;
+        if (isDark) {
+          if (isPredictedOutput) {
+            ctx.fillStyle = '#258BFF';
+          } else if (act > 0.06) {
+            const tint = Math.min(1, Math.pow(act, 0.75) * 0.95);
+            ctx.fillStyle =
+              layerIdx === 2
+                ? `rgba(116, 91, 255, ${0.24 + tint * 0.72})`
+                : tint > 0.65
+                ? `rgba(53, 216, 242, ${0.25 + tint * 0.7})`
+                : `rgba(37, 139, 255, ${0.24 + tint * 0.72})`;
+          } else {
+            ctx.fillStyle = '#09172B';
+          }
         } else {
-          ctx.fillStyle = '#FFFFFF';
+          if (isPredictedOutput) {
+            ctx.fillStyle = '#3478F6';
+          } else if (act > 0.06) {
+            const tint = Math.min(1, Math.pow(act, 0.75) * 0.95);
+            ctx.fillStyle =
+              layerIdx === 2
+                ? `rgba(88, 86, 214, ${0.18 + tint * 0.78})`
+                : `rgba(52, 120, 246, ${0.18 + tint * 0.78})`;
+          } else {
+            ctx.fillStyle = '#FFFFFF';
+          }
         }
         ctx.fill();
 
         ctx.lineWidth = isPredictedOutput ? 2.5 : act > 0.2 ? 1.6 : 1.2;
-        ctx.strokeStyle = isPredictedOutput
-          ? '#1D4ED8'
-          : act > 0.2
-          ? layerIdx === 2
-            ? '#5856D6'
-            : '#3478F6'
-          : '#D4D4CE';
+        if (isDark) {
+          ctx.strokeStyle = isPredictedOutput
+            ? '#35D8F2'
+            : act > 0.2
+            ? layerIdx === 2
+              ? '#745BFF'
+              : '#35D8F2'
+            : '#29476A';
+        } else {
+          ctx.strokeStyle = isPredictedOutput
+            ? '#1D4ED8'
+            : act > 0.2
+            ? layerIdx === 2
+              ? '#5856D6'
+              : '#3478F6'
+            : '#D4D4CE';
+        }
         ctx.stroke();
 
         // Output layer labels (digits 0-9 and percentages)
         if (layerIdx === 3) {
           ctx.font = '600 11px sans-serif';
-          ctx.fillStyle = isPredictedOutput || act > 0.55 ? '#FFFFFF' : '#202124';
+          ctx.fillStyle = isDark
+            ? isPredictedOutput || act > 0.45
+              ? '#F1F6FF'
+              : '#A2B5D0'
+            : isPredictedOutput || act > 0.55
+            ? '#FFFFFF'
+            : '#202124';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(String(node.realIndex), x, y);
 
-          // Probability bar and text to the right of output neuron
           const probPct = Math.round(node.activation * 100);
           ctx.textAlign = 'left';
           ctx.font = isPredictedOutput ? '700 11px monospace' : '500 10px monospace';
-          ctx.fillStyle = isPredictedOutput ? '#3478F6' : '#777777';
+          ctx.fillStyle = isDark
+            ? isPredictedOutput
+              ? '#35D8F2'
+              : '#A2B5D0'
+            : isPredictedOutput
+            ? '#3478F6'
+            : '#777777';
           ctx.fillText(`${probPct}%`, x + 18, y);
         }
       });
     });
-  }, [snapshot, progress, currentStage, activations.predictedDigit]);
+  }, [snapshot, progress, currentStage, activations.predictedDigit, isDark]);
 
   // Allow clicking on a neuron in the canvas to inspect its exact numeric value
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -362,7 +435,13 @@ export default function NeuralNetworkViz({
       </div>
 
       {/* Interactive Network Canvas */}
-      <div className="relative bg-[#FAFAF8] rounded-xl border border-[#E5E5E0] overflow-hidden">
+      <div
+        className={`relative rounded-xl border overflow-hidden ${
+          isDark
+            ? 'bg-[#081326] border-[#29476A] shadow-[inset_0_0_32px_rgba(5,11,24,0.75)]'
+            : 'bg-[#FAFAF8] border-[#E5E5E0]'
+        }`}
+      >
         <canvas
           ref={canvasRef}
           width={680}
@@ -394,7 +473,7 @@ export default function NeuralNetworkViz({
             <button
               type="button"
               onClick={() => setSelectedNode(null)}
-              className="text-[#777777] hover:text-[#202124] font-medium"
+              className="text-[#777777] hover:text-[#202124] font-medium cursor-pointer"
             >
               Close
             </button>

@@ -15,6 +15,13 @@ import {
   H2_SIZE,
   OUTPUT_SIZE,
 } from './neural-engine';
+import {
+  resolveInitialTheme,
+  getNextTheme,
+  getThemePalette,
+  DARK_MODE_PALETTE,
+  LIGHT_MODE_PALETTE,
+} from './theme-engine';
 
 test('784 -> 128 -> 64 -> 10 network architecture and forwardPass invariants', () => {
   const net = createNeuralNetwork('TestNet', 123);
@@ -177,3 +184,44 @@ test('Visualization snapshot extracts authentic weights and activations from net
   assert.equal(snap.nodesByLayer[3].length, 10);
   assert.ok(snap.synapses.length > 100);
 });
+
+test('Theme engine resolves initial theme from storage or OS preference and returns exact Dark/Light palettes', () => {
+  // Stored preference takes precedence over system preference
+  assert.equal(resolveInitialTheme('dark', false), 'dark');
+  assert.equal(resolveInitialTheme('light', true), 'light');
+
+  // Falls back to OS preference when storage is empty or invalid
+  assert.equal(resolveInitialTheme(null, true), 'dark');
+  assert.equal(resolveInitialTheme(null, false), 'light');
+  assert.equal(resolveInitialTheme('invalid', true), 'dark');
+
+  // Toggle transitions
+  assert.equal(getNextTheme('light'), 'dark');
+  assert.equal(getNextTheme('dark'), 'light');
+
+  // Exact Dark Mode colour system verification
+  const dark = getThemePalette('dark');
+  assert.equal(dark.bgPrimary, '#050B18');
+  assert.equal(dark.bgSecondary, '#081326');
+  assert.equal(dark.bgCard, '#0D1B33');
+  assert.equal(dark.bgElevated, '#122440');
+  assert.equal(dark.bgInput, '#09172B');
+  assert.equal(dark.accentBlue, '#258BFF');
+  assert.equal(dark.accentCyan, '#35D8F2');
+  assert.equal(dark.accentViolet, '#745BFF');
+  assert.equal(dark.accentSoftBlue, '#579BFF');
+  assert.equal(dark.textPrimary, '#F1F6FF');
+  assert.equal(dark.textSecondary, '#A2B5D0');
+  assert.equal(dark.textMuted, '#7186A6');
+  assert.equal(dark.borderSubtle, '#203653');
+  assert.equal(dark.borderElevated, '#29476A');
+  assert.deepEqual(dark, DARK_MODE_PALETTE);
+
+  // Light Mode preservation verification
+  const light = getThemePalette('light');
+  assert.equal(light.bgPrimary, '#FAFAF8');
+  assert.equal(light.bgCard, '#FFFFFF');
+  assert.equal(light.textPrimary, '#202124');
+  assert.deepEqual(light, LIGHT_MODE_PALETTE);
+});
+

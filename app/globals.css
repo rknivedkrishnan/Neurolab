@@ -1,1 +1,165 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Smooth 240ms theme colour transitions */
+html,
+body,
+header,
+footer,
+section,
+div,
+button,
+a,
+span,
+p,
+h1,
+h2,
+h3,
+h4,
+table,
+tr,
+td,
+th {
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: 240ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================================================
+   NEUROLAB Dark Mode Design Token System
+   Primary bg: #050B18 | Secondary bg: #081326 | Card: #0D1B33 | Elevated: #122440
+   Input bg: #09172B | Electric Blue: #258BFF | Bright Cyan: #35D8F2 | Violet: #745BFF
+   Primary text: #F1F6FF | Secondary text: #A2B5D0 | Muted text: #7186A6
+   Subtle border: #203653 | Elevated border: #29476A
+   ========================================================================== */
+
+html.dark body {
+  background-color: #050B18;
+  color: #F1F6FF;
+}
+
+/* Primary & Secondary surfaces */
+html.dark .bg-\[\#FAFAF8\] {
+  background-color: #081326 !important;
+}
+
+html.dark .bg-\[\#FAFAF8\]\/95 {
+  background-color: rgba(8, 19, 38, 0.88) !important;
+}
+
+html.dark .bg-\[\#F2F2EF\] {
+  background-color: #122440 !important;
+}
+
+/* Card & Elevated Card surfaces */
+html.dark .bg-white {
+  background-color: rgba(13, 27, 51, 0.92) !important;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 32px -10px rgba(2, 6, 16, 0.72), 0 0 0 1px rgba(37, 139, 255, 0.07);
+}
+
+/* Nested cards inside cards become Elevated Card surfaces (#122440) or Input surfaces (#09172B) */
+html.dark .bg-white .bg-\[\#FAFAF8\] {
+  background-color: #081326 !important;
+}
+
+html.dark .bg-white .bg-\[\#FAFAF8\] .bg-white,
+html.dark .bg-white .bg-white {
+  background-color: #122440 !important;
+  backdrop-filter: none;
+}
+
+html.dark .bg-white\/95 {
+  background-color: rgba(18, 36, 64, 0.95) !important;
+}
+
+/* Text hierarchy */
+html.dark .text-\[\#202124\] {
+  color: #F1F6FF !important;
+}
+
+html.dark .text-\[\#777777\] {
+  color: #A2B5D0 !important;
+}
+
+/* Accents */
+html.dark .text-\[\#3478F6\] {
+  color: #35D8F2 !important;
+}
+
+html.dark .text-\[\#5856D6\] {
+  color: #745BFF !important;
+}
+
+html.dark .bg-\[\#3478F6\] {
+  background-color: #258BFF !important;
+  box-shadow: 0 0 18px rgba(37, 139, 255, 0.28);
+}
+
+html.dark .hover\:bg-\[\#2563EB\]:hover {
+  background-color: #1B76E8 !important;
+  box-shadow: 0 0 22px rgba(53, 216, 242, 0.36);
+}
+
+html.dark .bg-\[\#202124\] {
+  background-color: #122440 !important;
+  border: 1px solid #29476A !important;
+  color: #F1F6FF !important;
+}
+
+html.dark .hover\:bg-\[\#333438\]:hover {
+  background-color: #193156 !important;
+}
+
+html.dark .hover\:bg-\[\#F2F2EF\]:hover {
+  background-color: #122440 !important;
+}
+
+html.dark .hover\:text-\[\#202124\]:hover {
+  color: #F1F6FF !important;
+}
+
+/* Borders & Separators */
+html.dark .border-\[\#E5E5E0\],
+html.dark .border-\[\#E5E5E0\]\/80 {
+  border-color: #203653 !important;
+}
+
+html.dark .bg-white .bg-\[\#FAFAF8\] {
+  border-color: #203653 !important;
+}
+
+html.dark .bg-white .bg-white {
+  border-color: #29476A !important;
+}
+
+html.dark .divide-\[\#E5E5E0\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #203653 !important;
+}
+
+html.dark .bg-\[\#E5E5E0\],
+html.dark .bg-\[\#E5E5E0\]\/70 {
+  background-color: #122440 !important;
+}
+
+html.dark .disabled\:bg-\[\#E5E5E0\]:disabled {
+  background-color: #122440 !important;
+  color: #7186A6 !important;
+  box-shadow: none !important;
+}
+
+/* Range inputs in Dark Mode */
+html.dark input[type="range"] {
+  accent-color: #35D8F2;
+}

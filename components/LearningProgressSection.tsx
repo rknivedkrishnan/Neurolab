@@ -20,6 +20,7 @@ import {
   NeuralNetworkState,
   evaluateDataset,
 } from '@/lib/neural-engine';
+import { useTheme } from './ThemeProvider';
 
 ChartJS.register(
   CategoryScale,
@@ -50,6 +51,8 @@ export default function LearningProgressSection({
   sessions,
   onGoToTeach,
 }: LearningProgressSectionProps) {
+  const { isDark } = useTheme();
+
   const visitorTestEval = React.useMemo(
     () => evaluateDataset(visitorModel, testDataset),
     [visitorModel, testDataset]
@@ -63,7 +66,7 @@ export default function LearningProgressSection({
     [pretrainedModel, testDataset]
   );
 
-  // Aggregate loss curve across training sessions (or fallback to initial -ln(1/10)=2.303 down to current baseline loss)
+  // Aggregate loss curve across training sessions
   const combinedLossPoints: number[] = React.useMemo(() => {
     if (sessions.length === 0) {
       const startLoss = 2.3026; // -ln(0.10) random initialization loss
@@ -85,11 +88,14 @@ export default function LearningProgressSection({
       {
         label: 'Training Loss (Cross-Entropy)',
         data: combinedLossPoints,
-        borderColor: '#3478F6',
-        backgroundColor: 'rgba(52, 120, 246, 0.10)',
+        borderColor: isDark ? '#35D8F2' : '#3478F6',
+        backgroundColor: isDark
+          ? 'rgba(37, 139, 255, 0.22)'
+          : 'rgba(52, 120, 246, 0.10)',
         borderWidth: 2.5,
-        pointRadius: 3,
-        pointBackgroundColor: '#3478F6',
+        pointRadius: 3.5,
+        pointBackgroundColor: isDark ? '#258BFF' : '#3478F6',
+        pointBorderColor: isDark ? '#35D8F2' : '#3478F6',
         tension: 0.3,
         fill: true,
       },
@@ -104,7 +110,7 @@ export default function LearningProgressSection({
         data: visitorTestEval.perDigitCorrect.map((corr, i) =>
           Math.round((corr / Math.max(1, visitorTestEval.perDigitTotal[i])) * 100)
         ),
-        backgroundColor: '#3478F6',
+        backgroundColor: isDark ? '#258BFF' : '#3478F6',
         borderRadius: 6,
       },
       {
@@ -112,10 +118,20 @@ export default function LearningProgressSection({
         data: pretrainedTestEval.perDigitCorrect.map((corr, i) =>
           Math.round((corr / Math.max(1, pretrainedTestEval.perDigitTotal[i])) * 100)
         ),
-        backgroundColor: '#D4D4CE',
+        backgroundColor: isDark ? '#745BFF' : '#D4D4CE',
         borderRadius: 6,
       },
     ],
+  };
+
+  const gridLineColor = isDark ? '#203653' : '#F2F2EF';
+  const tickTextColor = isDark ? '#A2B5D0' : '#777777';
+  const tooltipConfig = {
+    backgroundColor: isDark ? '#0D1B33' : '#202124',
+    titleColor: isDark ? '#F1F6FF' : '#FFFFFF',
+    bodyColor: isDark ? '#A2B5D0' : '#FAFAF8',
+    borderColor: isDark ? '#29476A' : '#333438',
+    borderWidth: 1,
   };
 
   return (
@@ -127,7 +143,7 @@ export default function LearningProgressSection({
             Educational Analytics · Live Model Metrics
           </p>
           <h1 className="text-2xl sm:text-3xl font-semibold text-[#202124] tracking-tight">
-            Learning Progress & Model Statistics
+            Learning Progress &amp; Model Statistics
           </h1>
           <p className="text-sm sm:text-base text-[#777777] mt-2 leading-relaxed">
             Every chart below reflects real mathematical evaluations of the 784 → 128 → 64 → 10 neural network. The Pretrained Reference Model is trained on 800 multi-style digits, and evaluation uses 100 strictly separate unseen test digits.
@@ -222,16 +238,24 @@ export default function LearningProgressSection({
                 maintainAspectRatio: false,
                 plugins: {
                   legend: { display: false },
+                  tooltip: tooltipConfig,
                 },
                 scales: {
                   y: {
                     beginAtZero: true,
-                    grid: { color: '#F2F2EF' },
-                    ticks: { font: { family: 'monospace', size: 11 } },
+                    grid: { color: gridLineColor },
+                    ticks: {
+                      color: tickTextColor,
+                      font: { family: 'monospace', size: 11 },
+                    },
                   },
                   x: {
                     grid: { display: false },
-                    ticks: { font: { size: 10 }, maxTicksLimit: 8 },
+                    ticks: {
+                      color: tickTextColor,
+                      font: { size: 10 },
+                      maxTicksLimit: 8,
+                    },
                   },
                 },
               }}
@@ -246,7 +270,7 @@ export default function LearningProgressSection({
               Test Accuracy by Digit (0–9)
             </h2>
             <p className="text-xs text-[#777777] mt-0.5">
-              Compares the Visitor-Trained Network (blue) against the Pretrained Reference Model (grey) on unseen test drawings.
+              Compares the Visitor-Trained Network against the Pretrained Reference Model on unseen test drawings.
             </p>
           </div>
           <div className="h-[260px]">
@@ -258,21 +282,30 @@ export default function LearningProgressSection({
                 plugins: {
                   legend: {
                     position: 'top',
-                    labels: { boxWidth: 12, font: { size: 11 } },
+                    labels: {
+                      color: tickTextColor,
+                      boxWidth: 12,
+                      font: { size: 11 },
+                    },
                   },
+                  tooltip: tooltipConfig,
                 },
                 scales: {
                   y: {
                     beginAtZero: true,
                     max: 100,
-                    grid: { color: '#F2F2EF' },
+                    grid: { color: gridLineColor },
                     ticks: {
+                      color: tickTextColor,
                       callback: (val) => `${val}%`,
                       font: { family: 'monospace', size: 11 },
                     },
                   },
                   x: {
                     grid: { display: false },
+                    ticks: {
+                      color: tickTextColor,
+                    },
                   },
                 },
               }}
