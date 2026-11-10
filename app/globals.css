@@ -26,16 +26,6 @@ th {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
 /* ==========================================================================
    NEUROLAB Dark Mode Design Token System
    Primary bg: #050B18 | Secondary bg: #081326 | Card: #0D1B33 | Elevated: #122440
@@ -49,39 +39,38 @@ html.dark body {
   color: #F1F6FF;
 }
 
-/* Primary & Secondary surfaces */
+/* Primary & Secondary surfaces (translucent so the live-wallpaper waves glow through) */
 html.dark .bg-\[\#FAFAF8\] {
-  background-color: #081326 !important;
+  background-color: rgba(8, 19, 38, 0.64) !important;
 }
 
 html.dark .bg-\[\#FAFAF8\]\/95 {
-  background-color: rgba(8, 19, 38, 0.88) !important;
+  background-color: rgba(8, 19, 38, 0.78) !important;
 }
 
 html.dark .bg-\[\#F2F2EF\] {
-  background-color: #122440 !important;
+  background-color: rgba(18, 36, 64, 0.78) !important;
 }
 
 /* Card & Elevated Card surfaces */
 html.dark .bg-white {
-  background-color: rgba(13, 27, 51, 0.92) !important;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 12px 32px -10px rgba(2, 6, 16, 0.72), 0 0 0 1px rgba(37, 139, 255, 0.07);
+  background-color: rgba(13, 27, 51, 0.72) !important;
+  box-shadow: 0 14px 36px -10px rgba(2, 6, 16, 0.75), 0 0 0 1px rgba(53, 216, 242, 0.14);
 }
 
-/* Nested cards inside cards become Elevated Card surfaces (#122440) or Input surfaces (#09172B) */
+/* Nested cards inside cards become Elevated Card surfaces (#122440) */
 html.dark .bg-white .bg-\[\#FAFAF8\] {
-  background-color: #081326 !important;
+  background-color: rgba(8, 19, 38, 0.62) !important;
 }
 
 html.dark .bg-white .bg-\[\#FAFAF8\] .bg-white,
 html.dark .bg-white .bg-white {
-  background-color: #122440 !important;
+  background-color: rgba(18, 36, 64, 0.84) !important;
   backdrop-filter: none;
 }
 
 html.dark .bg-white\/95 {
-  background-color: rgba(18, 36, 64, 0.95) !important;
+  background-color: rgba(18, 36, 64, 0.92) !important;
 }
 
 /* Text hierarchy */
@@ -104,12 +93,12 @@ html.dark .text-\[\#5856D6\] {
 
 html.dark .bg-\[\#3478F6\] {
   background-color: #258BFF !important;
-  box-shadow: 0 0 18px rgba(37, 139, 255, 0.28);
+  box-shadow: 0 0 18px rgba(37, 139, 255, 0.32);
 }
 
 html.dark .hover\:bg-\[\#2563EB\]:hover {
   background-color: #1B76E8 !important;
-  box-shadow: 0 0 22px rgba(53, 216, 242, 0.36);
+  box-shadow: 0 0 22px rgba(53, 216, 242, 0.42);
 }
 
 html.dark .bg-\[\#202124\] {
@@ -123,7 +112,7 @@ html.dark .hover\:bg-\[\#333438\]:hover {
 }
 
 html.dark .hover\:bg-\[\#F2F2EF\]:hover {
-  background-color: #122440 !important;
+  background-color: rgba(18, 36, 64, 0.9) !important;
 }
 
 html.dark .hover\:text-\[\#202124\]:hover {
@@ -133,7 +122,7 @@ html.dark .hover\:text-\[\#202124\]:hover {
 /* Borders & Separators */
 html.dark .border-\[\#E5E5E0\],
 html.dark .border-\[\#E5E5E0\]\/80 {
-  border-color: #203653 !important;
+  border-color: rgba(41, 71, 106, 0.75) !important;
 }
 
 html.dark .bg-white .bg-\[\#FAFAF8\] {

@@ -310,7 +310,7 @@ export default function NeurolabApp() {
       <AmbientDarkBackground />
 
       {/* Strict 3-Zone Top Navigation Bar */}
-      <header className="sticky top-0 z-30 bg-[#FAFAF8]/95 backdrop-blur-md border-b border-[#E5E5E0] px-4 sm:px-6 py-4 flex items-center justify-between gap-4 sm:gap-8">
+      <header className="sticky top-0 z-30 bg-[#FAFAF8]/95 border-b border-[#E5E5E0] px-4 sm:px-6 py-4 flex items-center justify-between gap-4 sm:gap-8">
         {/* Zone 1: Brand Wordmark */}
         <button
           type="button"
@@ -862,7 +862,7 @@ export default function NeurolabApp() {
       </main>
 
       {/* Exhibition Footer & Creator Watermark */}
-      <footer className="relative z-10 border-t border-[#E5E5E0] bg-[#FAFAF8]/95 backdrop-blur-md px-6 py-6 mt-12">
+      <footer className="relative z-10 border-t border-[#E5E5E0] bg-[#FAFAF8]/95 px-6 py-6 mt-12">
         <div className="max-w-[1380px] mx-auto flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-[#777777]">
             <div>
