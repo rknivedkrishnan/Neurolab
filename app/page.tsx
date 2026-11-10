@@ -832,9 +832,18 @@ export default function NeurolabApp() {
           </div>
 
           <div className="pt-4 border-t border-[#E5E5E0]/80 flex flex-col sm:flex-row items-center justify-between gap-3 pl-10 sm:pl-12">
-            <span className="text-[11px] font-mono text-[#777777]">
-              NEUROLAB Exhibition Build · Open-Source Educational AI
-            </span>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-[#777777]">
+              <span>NEUROLAB Exhibition Build</span>
+              <span>·</span>
+              <a
+                href="https://neurolab-three.vercel.app/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#3478F6] hover:underline font-medium"
+              >
+                https://neurolab-three.vercel.app/
+              </a>
+            </div>
             <div
               data-testid="creator-watermark"
               className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-lg bg-white border border-[#E5E5E0] text-xs font-semibold text-[#202124] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
