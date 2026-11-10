@@ -69,29 +69,33 @@ export default function TeachAiSection({
     setTimeout(() => setJustAddedToast(null), 5000);
   };
 
-  const handleBatchAddVariety = () => {
-    // Adds 10 fresh varied handwriting examples (one for each digit 0-9) and trains
+  const handleBatchAddVariety = (perDigitCount = 5) => {
+    // Adds 10 or 50 fresh varied handwriting examples across all 4 archetypes (0-9) and trains
     let lastEx: LabeledDigitExample | undefined;
+    const thicknesses = [1.0, 1.2, 1.35, 1.5, 1.65];
     for (let d = 0; d <= 9; d++) {
-      const px = synthesizeHandwrittenDigit(d, {
-        thickness: 1.6 + Math.random() * 0.5,
-        slant: (Math.random() - 0.5) * 0.16,
-        scaleX: 0.92 + Math.random() * 0.16,
-        scaleY: 0.92 + Math.random() * 0.16,
-        variant: Math.random() > 0.5 ? 1 : 0,
-      });
-      onAddExample(px, d);
-      lastEx = {
-        id: `batch-${d}`,
-        pixels: px,
-        label: d,
-        createdAt: Date.now(),
-        source: 'visitor',
-      };
+      for (let k = 0; k < perDigitCount; k++) {
+        const px = synthesizeHandwrittenDigit(d, {
+          thickness: thicknesses[k % thicknesses.length],
+          slant: ((k % 5) - 2) * 0.06,
+          scaleX: 0.9 + (k % 3) * 0.08,
+          scaleY: 0.9 + ((k + 1) % 3) * 0.08,
+          variant: (visitorDataset.length + k) % 4,
+        });
+        onAddExample(px, d);
+        lastEx = {
+          id: `batch-${d}-${k}`,
+          pixels: px,
+          label: d,
+          createdAt: Date.now(),
+          source: 'visitor',
+        };
+      }
     }
+    const totalAdded = perDigitCount * 10;
     onRunTraining(epochs, learningRate, lastEx);
     setJustAddedToast(
-      'Added 10 diverse handwritten digits (0–9) and completed live backpropagation!'
+      `Added +${totalAdded} diverse handwritten digits (0–9 across 4 handwriting styles) and completed live mini-batch backpropagation!`
     );
     setTimeout(() => setJustAddedToast(null), 5000);
   };
@@ -102,24 +106,32 @@ export default function TeachAiSection({
       <div className="bg-white rounded-2xl border border-[#E5E5E0] p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="max-w-2xl">
           <p className="text-xs font-medium text-[#777777] mb-1">
-            Interactive Training Studio · Real Backpropagation
+            Interactive Training Studio · Real Mini-Batch Backpropagation
           </p>
           <h1 className="text-2xl sm:text-3xl font-semibold text-[#202124] tracking-tight">
-            Teach the AI With Your Own Handwriting
+            Teach the AI With a Bigger Dataset
           </h1>
           <p className="text-sm sm:text-base text-[#777777] mt-2 leading-relaxed">
-            Draw a number, label what digit it truly is, and run real Adam backpropagation to watch the neural network update its 109,386 weights.
+            Draw a number, label what digit it truly is, or inject +50 diverse handwritten examples at once to watch the 784 → 128 → 64 → 10 network refine its 109,386 weights.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
-            onClick={handleBatchAddVariety}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#E5E5E0] bg-[#FAFAF8] hover:bg-[#F2F2EF] text-xs font-medium text-[#202124] transition-colors whitespace-nowrap cursor-pointer"
+            onClick={() => handleBatchAddVariety(5)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#3478F6] hover:bg-[#2563EB] text-xs font-semibold text-white transition-colors whitespace-nowrap cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Expand Dataset (+50 Examples) & Train
+          </button>
+          <button
+            type="button"
+            onClick={() => handleBatchAddVariety(1)}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-[#E5E5E0] bg-[#FAFAF8] hover:bg-[#F2F2EF] text-xs font-medium text-[#202124] transition-colors whitespace-nowrap cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5 text-[#3478F6]" />
-            Add 10 Balanced Examples (0–9) & Train
+            +10 Examples
           </button>
           <button
             type="button"
@@ -127,7 +139,7 @@ export default function TeachAiSection({
             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-[#E5E5E0] bg-white hover:bg-[#F2F2EF] text-xs font-medium text-[#777777] hover:text-[#202124] transition-colors whitespace-nowrap cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            Reset Visitor Model
+            Reset
           </button>
         </div>
       </div>

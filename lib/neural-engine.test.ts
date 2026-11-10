@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {
   createNeuralNetwork,
   forwardPass,
-  computeCrossEntropyLoss,
   trainNetworkOnBatch,
   evaluateDataset,
   normalizeGridToMNIST28x28,
   synthesizeHandwrittenDigit,
   initializeNeurolabModels,
   buildNetworkVisualizationSnapshot,
+  buildInitialDatasets,
   INPUT_SIZE,
   H1_SIZE,
   H2_SIZE,
@@ -33,11 +33,9 @@ test('784 -> 128 -> 64 -> 10 network architecture and forwardPass invariants', (
   assert.equal(result.hidden2.length, 64);
   assert.equal(result.probabilities.length, 10);
 
-  // ReLU outputs must be non-negative
   for (const h of result.hidden1) assert.ok(h >= 0);
   for (const h of result.hidden2) assert.ok(h >= 0);
 
-  // Softmax probabilities must sum to 1.0
   const probSum = result.probabilities.reduce((acc, v) => acc + v, 0);
   assert.ok(Math.abs(probSum - 1.0) < 1e-5, `Expected sum ~1.0, got ${probSum}`);
   assert.ok(result.predictedDigit >= 0 && result.predictedDigit <= 9);
@@ -71,24 +69,50 @@ test('Adam backpropagation genuinely reduces cross-entropy loss and updates weig
   );
 });
 
-test('Pretrained Reference Model achieves high recognition accuracy on held-out test set', () => {
+test('Expanded 1,000-example dataset (800 pretrained + 100 starter + 100 test) achieves >94% accuracy with zero digit-3 bias', () => {
+  const datasets = buildInitialDatasets();
+  assert.equal(datasets.pretrainedTrainingSet.length, 800);
+  assert.equal(datasets.visitorStarterSet.length, 100);
+  assert.equal(datasets.testDataset.length, 100);
+
   const { pretrainedModel, visitorModel, testDataset } = initializeNeurolabModels();
   const preEval = evaluateDataset(pretrainedModel, testDataset);
   const visEval = evaluateDataset(visitorModel, testDataset);
 
   assert.ok(
-    preEval.accuracy >= 0.88,
-    `Expected pretrained model accuracy >= 88%, got ${(preEval.accuracy * 100).toFixed(1)}%`
+    preEval.accuracy >= 0.94,
+    `Expected pretrained model accuracy >= 94%, got ${(preEval.accuracy * 100).toFixed(1)}%`
   );
   assert.ok(
-    preEval.accuracy > visEval.accuracy,
-    'Pretrained model should start with higher accuracy than lightly initialized visitor model'
+    visEval.accuracy >= 0.72,
+    `Expected visitor model starter accuracy >= 72%, got ${(visEval.accuracy * 100).toFixed(1)}%`
+  );
+
+  // Verify every single digit 0..9 is recognized across thin/medium/thick/slanted strokes without defaulting to 3
+  let countPredicted3OnNon3 = 0;
+  let totalNon3 = 0;
+  for (let d = 0; d <= 9; d++) {
+    for (const variant of [0, 1, 2, 3]) {
+      const sample = synthesizeHandwrittenDigit(d, {
+        thickness: 1.15,
+        slant: 0.04,
+        variant,
+      });
+      const res = forwardPass(sample, pretrainedModel);
+      if (d !== 3) {
+        totalNon3++;
+        if (res.predictedDigit === 3) countPredicted3OnNon3++;
+      }
+    }
+  }
+  assert.ok(
+    countPredicted3OnNon3 <= 1,
+    `Expected almost zero false '3' predictions on non-3 digits, got ${countPredicted3OnNon3}/${totalNon3}`
   );
 });
 
 test('MNIST 28x28 center-of-mass preprocessing normalizes off-center drawings', () => {
   const raw = new Float32Array(56 * 56);
-  // Draw a small vertical stroke in the bottom-right corner
   for (let y = 38; y <= 50; y++) {
     for (let x = 42; x <= 45; x++) {
       raw[y * 56 + x] = 1.0;
@@ -96,7 +120,6 @@ test('MNIST 28x28 center-of-mass preprocessing normalizes off-center drawings', 
   }
   const normalized = normalizeGridToMNIST28x28(raw, 56, 56);
   assert.equal(normalized.length, 784);
-  // Center region around (14, 14) should now have non-zero ink
   let centerMass = 0;
   for (let y = 10; y <= 18; y++) {
     for (let x = 10; x <= 18; x++) {

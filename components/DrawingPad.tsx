@@ -238,9 +238,9 @@ export default function DrawingPad({
     sampleVariationRef.current += 1;
     const v = sampleVariationRef.current;
     const sample = synthesizeHandwrittenDigit(digit, {
-      thickness: 1.8,
-      slant: ((v % 5) - 2) * 0.03,
-      variant: v % 2,
+      thickness: 1.3,
+      slant: ((v % 5) - 2) * 0.04,
+      variant: v % 4,
     });
     onPixelsChange(sample, true);
   };

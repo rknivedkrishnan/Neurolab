@@ -57,7 +57,7 @@ export default function NeurolabApp() {
 
   // Stage 1: Current 28x28 drawing (starts with a crisp sample '7' so the exhibition screen is immediately alive)
   const [currentPixels, setCurrentPixels] = useState<number[]>(() =>
-    synthesizeHandwrittenDigit(7, { thickness: 1.85, slant: 0.04, variant: 0 })
+    synthesizeHandwrittenDigit(7, { thickness: 1.3, slant: 0.04, variant: 0 })
   );
   const [animationTrigger, setAnimationTrigger] = useState<number>(1);
   const [activeExploreStage, setActiveExploreStage] = useState<1 | 2 | 3 | 4>(3);
@@ -180,12 +180,19 @@ export default function NeurolabApp() {
       setIsTrainingAnim(true);
 
       const nextModel = cloneNeuralNetwork(visitorModel);
-      // When focusing on a single visitor drawing, train on the visitor-contributed examples
-      // plus the focused drawing (and a small anchor sample) so single-example updates are realistic
+      // Keep a balanced 2-per-digit anchor from starter examples + visitor examples + 4x emphasis on focusExample
+      // so the network learns the visitor's drawing rapidly without biasing toward any single digit class
       const visitorContributed = visitorDataset.filter((d) => d.source === 'visitor');
-      const starterAnchor = visitorDataset.filter((_, i) => i % 4 === 0);
+      const starterAnchor = visitorDataset.filter((d, i) => d.source === 'starter' && i % 5 < 2);
       const trainingPool = focusExample
-        ? [...starterAnchor, ...visitorContributed, focusExample]
+        ? [
+            ...starterAnchor,
+            ...visitorContributed,
+            focusExample,
+            focusExample,
+            focusExample,
+            focusExample,
+          ]
         : [...visitorDataset];
 
       const sessionResult = trainNetworkOnBatch(nextModel, trainingPool, {
@@ -219,8 +226,44 @@ export default function NeurolabApp() {
     setCorrectDigitSelection(trueDigit);
     setActiveExploreStage(4);
     const addedEx = handleAddVisitorExample(currentPixels, trueDigit);
-    // Train the visitor model for 6 epochs focusing on this example
-    handleRunTraining(6, 0.0035, addedEx);
+    handleRunTraining(6, 0.004, addedEx);
+  };
+
+  // Expand Visitor Dataset by +50 diverse handwritten examples (5 per digit across all 4 styles)
+  const handleExpandDatasetFromExplore = () => {
+    setActiveExploreStage(4);
+    const thicknesses = [1.0, 1.2, 1.35, 1.5, 1.65];
+    const newBatch: LabeledDigitExample[] = [];
+    for (let d = 0; d <= 9; d++) {
+      for (let k = 0; k < 5; k++) {
+        const px = synthesizeHandwrittenDigit(d, {
+          thickness: thicknesses[k % thicknesses.length],
+          slant: ((k % 5) - 2) * 0.06,
+          scaleX: 0.9 + (k % 3) * 0.08,
+          scaleY: 0.9 + ((k + 1) % 3) * 0.08,
+          variant: (visitorDataset.length + k) % 4,
+        });
+        newBatch.push({
+          id: `exp-${Date.now()}-${d}-${k}`,
+          pixels: px,
+          label: d,
+          createdAt: Date.now(),
+          source: 'visitor',
+        });
+      }
+    }
+    const mergedDataset = [...visitorDataset, ...newBatch];
+    setVisitorDataset(mergedDataset);
+    const nextModel = cloneNeuralNetwork(visitorModel);
+    const sessionResult = trainNetworkOnBatch(nextModel, mergedDataset, {
+      epochs: 5,
+      learningRate: 0.0045,
+      batchSize: 25,
+      testDataset,
+    });
+    setVisitorModel(nextModel);
+    setLatestExploreTraining(sessionResult);
+    setTrainingSessions((prev) => [sessionResult, ...prev].slice(0, 25));
   };
 
   // Reset visitor model & session for the next exhibition guest
@@ -588,29 +631,40 @@ export default function NeurolabApp() {
                     })}
                   </div>
 
-                  {/* Primary Action to Trigger Genuine Model Training */}
-                  <button
-                    type="button"
-                    disabled={correctDigitSelection === null || !hasInk || isTrainingAnim}
-                    onClick={() => {
-                      if (correctDigitSelection !== null) {
-                        handleTeachFromExplore(correctDigitSelection);
-                      }
-                    }}
-                    className="w-full py-3.5 px-5 rounded-xl bg-[#202124] hover:bg-[#333438] disabled:bg-[#E5E5E0] disabled:text-[#777777] text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                  >
-                    {isTrainingAnim ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Updating 109,386 Neural Weights...
-                      </>
-                    ) : (
-                      <>
-                        <GraduationCap className="w-4 h-4 text-[#3478F6]" />
-                        Teach AI: “This Drawing is a {correctDigitSelection ?? '?'}”
-                      </>
-                    )}
-                  </button>
+                  {/* Primary Action to Trigger Genuine Model Training + Expand Dataset */}
+                  <div className="flex flex-col sm:flex-row items-stretch gap-2.5">
+                    <button
+                      type="button"
+                      disabled={correctDigitSelection === null || !hasInk || isTrainingAnim}
+                      onClick={() => {
+                        if (correctDigitSelection !== null) {
+                          handleTeachFromExplore(correctDigitSelection);
+                        }
+                      }}
+                      className="flex-1 py-3.5 px-4 rounded-xl bg-[#202124] hover:bg-[#333438] disabled:bg-[#E5E5E0] disabled:text-[#777777] text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      {isTrainingAnim ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Updating Weights...
+                        </>
+                      ) : (
+                        <>
+                          <GraduationCap className="w-4 h-4 text-[#3478F6]" />
+                          Teach AI: “This Drawing is a {correctDigitSelection ?? '?'}”
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isTrainingAnim}
+                      onClick={handleExpandDatasetFromExplore}
+                      className="py-3.5 px-4 rounded-xl border border-[#E5E5E0] bg-[#FAFAF8] hover:bg-[#F2F2EF] text-xs font-semibold text-[#202124] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      +50 Dataset Examples
+                    </button>
+                  </div>
 
                   {/* Live Training Result & Before/After Comparison */}
                   {latestExploreTraining ? (

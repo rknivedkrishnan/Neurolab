@@ -130,7 +130,7 @@ export default function LearningProgressSection({
             Learning Progress & Model Statistics
           </h1>
           <p className="text-sm sm:text-base text-[#777777] mt-2 leading-relaxed">
-            Every chart below reflects real mathematical evaluations of the 784 → 128 → 64 → 10 neural network. Training examples are kept strictly separate from the 50 unseen test digits.
+            Every chart below reflects real mathematical evaluations of the 784 → 128 → 64 → 10 neural network. The Pretrained Reference Model is trained on 800 multi-style digits, and evaluation uses 100 strictly separate unseen test digits.
           </p>
         </div>
         <button
@@ -138,7 +138,7 @@ export default function LearningProgressSection({
           onClick={onGoToTeach}
           className="px-4 py-2.5 rounded-xl bg-[#3478F6] hover:bg-[#2563EB] text-xs font-medium text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
         >
-          Add More Training Examples
+          Expand Training Dataset
         </button>
       </div>
 
@@ -154,7 +154,7 @@ export default function LearningProgressSection({
             </p>
           </div>
           <p className="text-xs text-[#777777] mt-3 leading-relaxed">
-            Total labelled drawings in the training set ({visitorDataset.filter((d) => d.source === 'visitor').length} contributed by exhibition visitors).
+            Labelled drawings in the Visitor Model dataset ({visitorDataset.filter((d) => d.source === 'visitor').length} added in session · Pretrained Model uses 800).
           </p>
         </div>
 
@@ -182,7 +182,7 @@ export default function LearningProgressSection({
             </p>
           </div>
           <p className="text-xs text-[#777777] mt-3 leading-relaxed">
-            How often the AI correctly identifies numbers across 50 unseen test examples (Pretrained reference:{' '}
+            How often the AI correctly identifies numbers across 100 unseen test examples (Pretrained 800-example reference:{' '}
             {(pretrainedTestEval.accuracy * 100).toFixed(0)}%).
           </p>
         </div>
