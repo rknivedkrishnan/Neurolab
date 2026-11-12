@@ -10,6 +10,8 @@ import {
   initializeNeurolabModels,
   buildNetworkVisualizationSnapshot,
   buildInitialDatasets,
+  computeNeuronSaliencyMap,
+  isNeuronAblated,
   INPUT_SIZE,
   H1_SIZE,
   H2_SIZE,
@@ -203,6 +205,42 @@ test('Visualization snapshot extracts authentic weights and activations from net
   assert.ok(snap.synapses.length > 100);
 });
 
+test('Neuron Saliency Heatmap (#1) and Interactive Neuron Ablation (#4) compute valid receptive fields and zero ablated hidden units', () => {
+  const { pretrainedModel } = initializeNeurolabModels();
+  const sample8 = synthesizeHandwrittenDigit(8, { thickness: 1.25, slant: 0, variant: 0 });
+  const intactAct = forwardPass(sample8, pretrainedModel);
+
+  // Verify 28x28 saliency map on Output, H1, and H2 neurons
+  const outSaliency = computeNeuronSaliencyMap(pretrainedModel, intactAct, 3, 8);
+  assert.equal(outSaliency.receptiveField.length, 784);
+  assert.equal(outSaliency.inputAttribution.length, 784);
+  assert.ok(outSaliency.excitatoryScore > 0, 'Expected positive excitatory attribution on drawn digit');
+
+  const h1Saliency = computeNeuronSaliencyMap(pretrainedModel, intactAct, 1, 10);
+  assert.equal(h1Saliency.receptiveField.length, 784);
+  for (const v of h1Saliency.receptiveField) {
+    assert.ok(v >= -1 && v <= 1, 'Expected normalized receptive field in [-1, 1]');
+  }
+
+  // Verify Interactive Neuron Ablation zeroes ablated hidden units and updates snapshot counts
+  const ablation = {
+    dropoutRatio: 0.5,
+    disabledH1: [0, 1, 2],
+    disabledH2: [0, 1],
+  };
+  assert.equal(isNeuronAblated(1, 0, ablation), true);
+  assert.equal(isNeuronAblated(2, 1, ablation), true);
+
+  const ablatedAct = forwardPass(sample8, pretrainedModel, ablation);
+  assert.equal(ablatedAct.hidden1[0], 0);
+  assert.equal(ablatedAct.hidden1[1], 0);
+  assert.equal(ablatedAct.hidden2[0], 0);
+
+  const ablatedSnap = buildNetworkVisualizationSnapshot(ablatedAct, pretrainedModel, ablation);
+  assert.ok(ablatedSnap.ablatedH1Count >= 60, `Expected >= 60 ablated H1 neurons, got ${ablatedSnap.ablatedH1Count}`);
+  assert.ok(ablatedSnap.ablatedH2Count >= 30, `Expected >= 30 ablated H2 neurons, got ${ablatedSnap.ablatedH2Count}`);
+});
+
 test('Theme engine resolves initial theme from storage or OS preference and returns exact Dark/Light palettes', () => {
   // Stored preference takes precedence over system preference
   assert.equal(resolveInitialTheme('dark', false), 'dark');
@@ -242,4 +280,5 @@ test('Theme engine resolves initial theme from storage or OS preference and retu
   assert.equal(light.textPrimary, '#202124');
   assert.deepEqual(light, LIGHT_MODE_PALETTE);
 });
+
 

@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Sun,
   Moon,
+  GitCompare,
 } from 'lucide-react';
 import {
   initializeNeurolabModels,
@@ -23,6 +24,7 @@ import {
   LabeledDigitExample,
   TrainingSessionResult,
   NeuralNetworkState,
+  NeuronAblationConfig,
 } from '@/lib/neural-engine';
 import { syncWithTensorFlowJs, TfModelRuntimeInfo } from '@/lib/tf-bridge';
 import DrawingPad from '@/components/DrawingPad';
@@ -59,6 +61,13 @@ export default function NeurolabApp() {
 
   // Active model mode for Stage 2 & 3 inspection ('pretrained' for reliable initial recognition, 'visitor' for visitor-trained network)
   const [activeModelMode, setActiveModelMode] = useState<'pretrained' | 'visitor'>('pretrained');
+
+  // Interactive Neuron Ablation state (#4 Brain Resilience Lab)
+  const [ablationConfig, setAblationConfig] = useState<NeuronAblationConfig>({
+    dropoutRatio: 0,
+    disabledH1: [],
+    disabledH2: [],
+  });
 
   // Stage 1: Current 28x28 drawing (starts with a crisp sample '7' so the exhibition screen is immediately alive)
   const [currentPixels, setCurrentPixels] = useState<number[]>(() =>
@@ -116,16 +125,18 @@ export default function NeurolabApp() {
     });
   }, []);
 
-  // Compute live forward pass activations for both models
+  // Compute live forward pass activations for both models (including any active neuron ablation)
   const activeNetwork = activeModelMode === 'pretrained' ? pretrainedModel : visitorModel;
-  const currentActivations = useMemo(
-    () => forwardPass(currentPixels, activeNetwork),
-    [currentPixels, activeNetwork]
+  const pretrainedActivations = useMemo(
+    () => forwardPass(currentPixels, pretrainedModel, ablationConfig),
+    [currentPixels, pretrainedModel, ablationConfig]
   );
   const visitorActivations = useMemo(
-    () => forwardPass(currentPixels, visitorModel),
-    [currentPixels, visitorModel]
+    () => forwardPass(currentPixels, visitorModel, ablationConfig),
+    [currentPixels, visitorModel, ablationConfig]
   );
+  const currentActivations =
+    activeModelMode === 'pretrained' ? pretrainedActivations : visitorActivations;
 
   const visitorTestAccuracy = useMemo(
     () => evaluateDataset(visitorModel, testDataset).accuracy,
@@ -475,6 +486,8 @@ export default function NeurolabApp() {
                   activeModelMode={activeModelMode}
                   onModelModeChange={setActiveModelMode}
                   animationTrigger={animationTrigger}
+                  ablationConfig={ablationConfig}
+                  onAblationChange={setAblationConfig}
                 />
               </div>
             </div>
@@ -575,6 +588,145 @@ export default function NeurolabApp() {
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  {/* #2 SIDE-BY-SIDE "PRETRAINED VS. VISITOR MODEL" LIVE COMPARISON */}
+                  <div
+                    data-testid="model-comparison-card"
+                    className="mt-4 bg-[#FAFAF8] rounded-xl border border-[#E5E5E0] p-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <GitCompare className="w-4 h-4 text-[#3478F6] shrink-0" />
+                        <span className="text-xs font-semibold text-[#202124]">
+                          Side-by-Side Model Comparison
+                        </span>
+                      </div>
+                      {hasInk && (
+                        <span
+                          data-testid="model-agreement-badge"
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono ${
+                            pretrainedActivations.predictedDigit ===
+                            visitorActivations.predictedDigit
+                              ? 'bg-emerald-500/15 text-emerald-600 border border-emerald-500/30'
+                              : 'bg-amber-500/15 text-amber-600 border border-amber-500/30'
+                          }`}
+                        >
+                          {pretrainedActivations.predictedDigit ===
+                          visitorActivations.predictedDigit
+                            ? `Models Agree · Digit ${pretrainedActivations.predictedDigit}`
+                            : `Models Disagree · ${pretrainedActivations.predictedDigit} vs ${visitorActivations.predictedDigit}`}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Pretrained Reference Model Card */}
+                      <button
+                        type="button"
+                        data-testid="compare-select-pretrained"
+                        onClick={() => setActiveModelMode('pretrained')}
+                        className={`text-left rounded-xl border p-3.5 transition-all cursor-pointer ${
+                          activeModelMode === 'pretrained'
+                            ? 'bg-white border-[#3478F6] ring-1 ring-[#3478F6]/30 shadow-xs'
+                            : 'bg-white/70 border-[#E5E5E0] hover:border-[#3478F6]/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold text-[#202124]">
+                            Pretrained Reference
+                          </span>
+                          <span className="text-[10px] font-mono text-[#777777]">
+                            800 samples · 8 epochs
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-baseline justify-between">
+                          <div>
+                            <span className="text-[10px] text-[#777777] block">Prediction</span>
+                            <span
+                              data-testid="compare-pretrained-digit"
+                              className="text-2xl font-bold font-mono text-[#202124] tabular-nums"
+                            >
+                              {hasInk ? pretrainedActivations.predictedDigit : '–'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-[#777777] block">Confidence</span>
+                            <span
+                              data-testid="compare-pretrained-confidence"
+                              className="text-sm font-bold font-mono text-[#3478F6] tabular-nums"
+                            >
+                              {hasInk
+                                ? `${(pretrainedActivations.confidence * 100).toFixed(1)}%`
+                                : '0.0%'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="mt-2 w-full h-1.5 bg-[#E5E5E0]/70 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[#3478F6] rounded-full transition-all duration-300"
+                            style={{
+                              width: `${
+                                hasInk ? Math.max(4, pretrainedActivations.confidence * 100) : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </button>
+
+                      {/* Visitor-Trained Model Card */}
+                      <button
+                        type="button"
+                        data-testid="compare-select-visitor"
+                        onClick={() => setActiveModelMode('visitor')}
+                        className={`text-left rounded-xl border p-3.5 transition-all cursor-pointer ${
+                          activeModelMode === 'visitor'
+                            ? 'bg-white border-[#3478F6] ring-1 ring-[#3478F6]/30 shadow-xs'
+                            : 'bg-white/70 border-[#E5E5E0] hover:border-[#3478F6]/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold text-[#202124]">
+                            Visitor-Trained Model
+                          </span>
+                          <span className="text-[10px] font-mono text-[#777777]">
+                            {visitorDataset.length} samples · {visitorModel.totalTrainingSteps} steps
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-baseline justify-between">
+                          <div>
+                            <span className="text-[10px] text-[#777777] block">Prediction</span>
+                            <span
+                              data-testid="compare-visitor-digit"
+                              className="text-2xl font-bold font-mono text-[#202124] tabular-nums"
+                            >
+                              {hasInk ? visitorActivations.predictedDigit : '–'}
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-[#777777] block">Confidence</span>
+                            <span
+                              data-testid="compare-visitor-confidence"
+                              className="text-sm font-bold font-mono text-[#3478F6] tabular-nums"
+                            >
+                              {hasInk
+                                ? `${(visitorActivations.confidence * 100).toFixed(1)}%`
+                                : '0.0%'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="mt-2 w-full h-1.5 bg-[#E5E5E0]/70 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[#3478F6] rounded-full transition-all duration-300"
+                            style={{
+                              width: `${
+                                hasInk ? Math.max(4, visitorActivations.confidence * 100) : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      </button>
                     </div>
                   </div>
                 </div>

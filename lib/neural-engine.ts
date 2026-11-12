@@ -31,6 +31,7 @@ export interface VisualNode {
   activation: number; // Normalized [0, 1] for display
   rawActivation: number; // Actual numeric activation
   label: string;
+  isAblated?: boolean; // True when surgically disabled via Neuron Ablation
 }
 
 export interface VisualSynapse {
@@ -52,6 +53,24 @@ export interface NetworkVisualizationSnapshot {
   maxActivationH2: number;
   activeH1Count: number;
   activeH2Count: number;
+  ablatedH1Count: number;
+  ablatedH2Count: number;
+}
+
+export interface NeuronAblationConfig {
+  dropoutRatio: number; // 0.0 to 0.90 (percentage of hidden neurons disabled)
+  disabledH1: number[]; // Explicitly disabled H1 neuron real indices
+  disabledH2: number[]; // Explicitly disabled H2 neuron real indices
+}
+
+export interface NeuronSaliencyMap {
+  layerIndex: 0 | 1 | 2 | 3;
+  realIndex: number;
+  label: string;
+  receptiveField: number[]; // 784 values normalized to [-1, 1] (excitatory vs inhibitory)
+  inputAttribution: number[]; // 784 values normalized to [-1, 1] (input[i] * receptiveField[i])
+  excitatoryScore: number; // Sum of positive active attributions
+  inhibitoryScore: number; // Sum of negative active attributions
 }
 
 export interface NeuralNetworkState {
@@ -203,11 +222,33 @@ export function cloneNeuralNetwork(net: NeuralNetworkState): NeuralNetworkState 
   };
 }
 
+/**
+ * Determines whether a specific hidden neuron in H1 or H2 is disabled (ablated)
+ * either via explicit surgical selection or deterministic percentage dropout.
+ */
+export function isNeuronAblated(
+  layerIndex: 1 | 2,
+  realIndex: number,
+  ablation?: NeuronAblationConfig
+): boolean {
+  if (!ablation) return false;
+  if (layerIndex === 1 && ablation.disabledH1.includes(realIndex)) return true;
+  if (layerIndex === 2 && ablation.disabledH2.includes(realIndex)) return true;
+  if (ablation.dropoutRatio <= 0) return false;
+
+  const size = layerIndex === 1 ? H1_SIZE : H2_SIZE;
+  const prime = layerIndex === 1 ? 73 : 37;
+  const offset = layerIndex === 1 ? 19 : 11;
+  const rank = ((realIndex * prime + offset) % size) / size;
+  return rank < ablation.dropoutRatio;
+}
+
 function singleForwardLogits(
   input: number[] | Float32Array,
   net: NeuralNetworkState,
   shiftX = 0,
-  shiftY = 0
+  shiftY = 0,
+  ablation?: NeuronAblationConfig
 ): {
   hidden1Raw: number[];
   hidden1: number[];
@@ -251,8 +292,12 @@ function singleForwardLogits(
   }
 
   for (let j = 0; j < H1_SIZE; j++) {
-    const sum = hidden1Raw[j];
-    hidden1[j] = sum > 0 ? sum : 0;
+    if (ablation && isNeuronAblated(1, j, ablation)) {
+      hidden1[j] = 0;
+    } else {
+      const sum = hidden1Raw[j];
+      hidden1[j] = sum > 0 ? sum : 0;
+    }
   }
 
   const hidden2Raw = new Array<number>(H2_SIZE);
@@ -273,8 +318,12 @@ function singleForwardLogits(
   }
 
   for (let k = 0; k < H2_SIZE; k++) {
-    const sum = hidden2Raw[k];
-    hidden2[k] = sum > 0 ? sum : 0;
+    if (ablation && isNeuronAblated(2, k, ablation)) {
+      hidden2[k] = 0;
+    } else {
+      const sum = hidden2Raw[k];
+      hidden2[k] = sum > 0 ? sum : 0;
+    }
   }
 
   const logits = new Array<number>(OUTPUT_SIZE);
@@ -566,14 +615,25 @@ export function computeTopologicalDigitLogits(input: number[] | Float32Array): n
  */
 export function forwardPass(
   input: number[] | Float32Array,
-  net: NeuralNetworkState
+  net: NeuralNetworkState,
+  ablation?: NeuronAblationConfig
 ): LayerActivations {
-  const base = singleForwardLogits(input, net, 0, 0);
+  const base = singleForwardLogits(input, net, 0, 0, ablation);
   const logits = [...base.logits];
 
-  // Apply shift-invariant spatial pooling and topological calibration proportionally to model maturity
-  const maturity = Math.min(1, net.totalTrainingSteps / 30);
-  if (maturity > 0.1) {
+  // Calculate active neuron survival ratio when ablation is used
+  const dropoutFraction = ablation
+    ? Math.min(
+        0.95,
+        ablation.dropoutRatio +
+          (ablation.disabledH1.length / H1_SIZE + ablation.disabledH2.length / H2_SIZE) * 0.5
+      )
+    : 0;
+  const survivalFactor = Math.max(0.05, 1 - Math.pow(dropoutFraction, 1.15) * 0.94);
+
+  // Apply shift-invariant spatial pooling and topological calibration proportionally to model maturity & survival
+  const maturity = Math.min(1, net.totalTrainingSteps / 30) * survivalFactor;
+  if (maturity > 0.06) {
     const shifts: Array<[number, number, number]> = [
       [-1, 0, 0.16],
       [1, 0, 0.16],
@@ -583,7 +643,7 @@ export function forwardPass(
     let totalWeight = 1.0;
     for (const [sx, sy, w] of shifts) {
       const ew = w * maturity;
-      const shifted = singleForwardLogits(input, net, sx, sy);
+      const shifted = singleForwardLogits(input, net, sx, sy, ablation);
       for (let o = 0; o < OUTPUT_SIZE; o++) {
         logits[o] += shifted.logits[o] * ew;
       }
@@ -1031,7 +1091,8 @@ export function trainNetworkOnBatch(
  */
 export function buildNetworkVisualizationSnapshot(
   activations: LayerActivations,
-  net: NeuralNetworkState
+  net: NeuralNetworkState,
+  ablation?: NeuronAblationConfig
 ): NetworkVisualizationSnapshot {
   const inputVisualCount = 16;
   const h1VisualCount = 14;
@@ -1061,14 +1122,19 @@ export function buildNetworkVisualizationSnapshot(
       activation: maxVal,
       rawActivation: maxVal,
       label: `px #${bestRealIndex}`,
+      isAblated: false,
     });
   }
 
   let maxH1 = 0.001;
   let activeH1Count = 0;
+  let ablatedH1Count = 0;
   for (let j = 0; j < H1_SIZE; j++) {
-    if (activations.hidden1[j] > maxH1) maxH1 = activations.hidden1[j];
-    if (activations.hidden1[j] > 0.01) activeH1Count++;
+    const ablated = isNeuronAblated(1, j, ablation);
+    if (ablated) ablatedH1Count++;
+    const rawPos = Math.max(0, activations.hidden1Raw[j]);
+    if (rawPos > maxH1) maxH1 = rawPos;
+    if (!ablated && activations.hidden1[j] > 0.01) activeH1Count++;
   }
 
   const h1Nodes: VisualNode[] = [];
@@ -1077,28 +1143,35 @@ export function buildNetworkVisualizationSnapshot(
     const start = idx * stride1;
     const end = idx === h1VisualCount - 1 ? H1_SIZE : start + stride1;
     let bestJ = start;
-    let bestVal = -1;
+    let bestRaw = -Infinity;
     for (let j = start; j < end; j++) {
-      if (activations.hidden1[j] > bestVal) {
-        bestVal = activations.hidden1[j];
+      if (activations.hidden1Raw[j] > bestRaw) {
+        bestRaw = activations.hidden1Raw[j];
         bestJ = j;
       }
     }
+    const ablated = isNeuronAblated(1, bestJ, ablation);
+    const actVal = ablated ? 0 : activations.hidden1[bestJ];
     h1Nodes.push({
       layerIndex: 1,
       nodeIndex: idx,
       realIndex: bestJ,
-      activation: Math.min(1, Math.max(0, bestVal / maxH1)),
-      rawActivation: bestVal,
+      activation: Math.min(1, Math.max(0, actVal / maxH1)),
+      rawActivation: actVal,
       label: `H1 · #${bestJ}`,
+      isAblated: ablated,
     });
   }
 
   let maxH2 = 0.001;
   let activeH2Count = 0;
+  let ablatedH2Count = 0;
   for (let k = 0; k < H2_SIZE; k++) {
-    if (activations.hidden2[k] > maxH2) maxH2 = activations.hidden2[k];
-    if (activations.hidden2[k] > 0.01) activeH2Count++;
+    const ablated = isNeuronAblated(2, k, ablation);
+    if (ablated) ablatedH2Count++;
+    const rawPos = Math.max(0, activations.hidden2Raw[k]);
+    if (rawPos > maxH2) maxH2 = rawPos;
+    if (!ablated && activations.hidden2[k] > 0.01) activeH2Count++;
   }
 
   const h2Nodes: VisualNode[] = [];
@@ -1107,20 +1180,23 @@ export function buildNetworkVisualizationSnapshot(
     const start = idx * stride2;
     const end = idx === h2VisualCount - 1 ? H2_SIZE : start + stride2;
     let bestK = start;
-    let bestVal = -1;
+    let bestRaw = -Infinity;
     for (let k = start; k < end; k++) {
-      if (activations.hidden2[k] > bestVal) {
-        bestVal = activations.hidden2[k];
+      if (activations.hidden2Raw[k] > bestRaw) {
+        bestRaw = activations.hidden2Raw[k];
         bestK = k;
       }
     }
+    const ablated = isNeuronAblated(2, bestK, ablation);
+    const actVal = ablated ? 0 : activations.hidden2[bestK];
     h2Nodes.push({
       layerIndex: 2,
       nodeIndex: idx,
       realIndex: bestK,
-      activation: Math.min(1, Math.max(0, bestVal / maxH2)),
-      rawActivation: bestVal,
+      activation: Math.min(1, Math.max(0, actVal / maxH2)),
+      rawActivation: actVal,
       label: `H2 · #${bestK}`,
+      isAblated: ablated,
     });
   }
 
@@ -1133,6 +1209,7 @@ export function buildNetworkVisualizationSnapshot(
       activation: activations.probabilities[o],
       rawActivation: activations.logits[o],
       label: `${o}`,
+      isAblated: false,
     });
   }
 
@@ -1141,7 +1218,7 @@ export function buildNetworkVisualizationSnapshot(
   for (const inNode of inputNodes) {
     for (const h1Node of h1Nodes) {
       const w = net.W1[inNode.realIndex * H1_SIZE + h1Node.realIndex];
-      const signal = Math.abs(inNode.activation * w);
+      const signal = h1Node.isAblated ? 0 : Math.abs(inNode.activation * w);
       synapses.push({
         fromLayer: 0,
         toLayer: 1,
@@ -1159,7 +1236,8 @@ export function buildNetworkVisualizationSnapshot(
   for (const h1Node of h1Nodes) {
     for (const h2Node of h2Nodes) {
       const w = net.W2[h1Node.realIndex * H2_SIZE + h2Node.realIndex];
-      const signal = Math.abs(h1Node.activation * w);
+      const signal =
+        h1Node.isAblated || h2Node.isAblated ? 0 : Math.abs(h1Node.activation * w);
       synapses.push({
         fromLayer: 1,
         toLayer: 2,
@@ -1177,7 +1255,7 @@ export function buildNetworkVisualizationSnapshot(
   for (const h2Node of h2Nodes) {
     for (const outNode of outputNodes) {
       const w = net.W3[h2Node.realIndex * OUTPUT_SIZE + outNode.realIndex];
-      const signal = Math.abs(h2Node.activation * w);
+      const signal = h2Node.isAblated ? 0 : Math.abs(h2Node.activation * w);
       synapses.push({
         fromLayer: 2,
         toLayer: 3,
@@ -1199,6 +1277,121 @@ export function buildNetworkVisualizationSnapshot(
     maxActivationH2: maxH2,
     activeH1Count,
     activeH2Count,
+    ablatedH1Count,
+    ablatedH2Count,
+  };
+}
+
+/**
+ * Computes the 28x28 Receptive Field Saliency Map and Active Drawing Attribution Map
+ * for any neuron in the network (Input pixel, Hidden Layer 1, Hidden Layer 2, or Output Digit 0-9).
+ * Back-projects effective weights through active ReLU pathways back to the 28x28 pixel canvas.
+ */
+export function computeNeuronSaliencyMap(
+  net: NeuralNetworkState,
+  activations: LayerActivations,
+  layerIndex: 0 | 1 | 2 | 3,
+  realIndex: number
+): NeuronSaliencyMap {
+  const rawReceptive = new Float32Array(INPUT_SIZE);
+  let label = '';
+
+  if (layerIndex === 0) {
+    const idx = Math.max(0, Math.min(INPUT_SIZE - 1, realIndex));
+    label = `Input Pixel #${idx} (Row ${Math.floor(idx / 28)}, Col ${idx % 28})`;
+    // Show outgoing sensitivity of this pixel to active H1 neurons and its immediate neighborhood
+    const r0 = Math.floor(idx / 28);
+    const c0 = idx % 28;
+    for (let r = 0; r < 28; r++) {
+      for (let c = 0; c < 28; c++) {
+        const d2 = (r - r0) * (r - r0) + (c - c0) * (c - c0);
+        if (d2 <= 9) {
+          rawReceptive[r * 28 + c] = Math.exp(-d2 / 2.5);
+        }
+      }
+    }
+  } else if (layerIndex === 1) {
+    const j = Math.max(0, Math.min(H1_SIZE - 1, realIndex));
+    label = `Hidden Layer 1 · Neuron #${j}`;
+    for (let i = 0; i < INPUT_SIZE; i++) {
+      rawReceptive[i] = net.W1[i * H1_SIZE + j];
+    }
+  } else if (layerIndex === 2) {
+    const k = Math.max(0, Math.min(H2_SIZE - 1, realIndex));
+    label = `Hidden Layer 2 · Neuron #${k}`;
+    // Back-project H2 neuron k through H1 weights to 784 pixels
+    for (let j = 0; j < H1_SIZE; j++) {
+      const gate1 = activations.hidden1[j] > 0 ? 1.0 : 0.22;
+      const w2 = net.W2[j * H2_SIZE + k] * gate1;
+      if (Math.abs(w2) < 1e-5) continue;
+      const rowOffset = j;
+      for (let i = 0; i < INPUT_SIZE; i++) {
+        rawReceptive[i] += net.W1[i * H1_SIZE + rowOffset] * w2;
+      }
+    }
+  } else {
+    const o = Math.max(0, Math.min(OUTPUT_SIZE - 1, realIndex));
+    label = `Output Digit ${o} Detector`;
+    // Back-project Output digit o through H2 and H1 to 784 pixels
+    const effH1 = new Float32Array(H1_SIZE);
+    for (let j = 0; j < H1_SIZE; j++) {
+      const gate1 = activations.hidden1[j] > 0 ? 1.0 : 0.2;
+      let sumH2 = 0;
+      const rowOffset = j * H2_SIZE;
+      for (let k = 0; k < H2_SIZE; k++) {
+        const gate2 = activations.hidden2[k] > 0 ? 1.0 : 0.2;
+        sumH2 += net.W2[rowOffset + k] * gate2 * net.W3[k * OUTPUT_SIZE + o];
+      }
+      effH1[j] = sumH2 * gate1;
+    }
+
+    for (let i = 0; i < INPUT_SIZE; i++) {
+      const baseIdx = i * H1_SIZE;
+      let sumPx = 0;
+      for (let j = 0; j < H1_SIZE; j++) {
+        sumPx += net.W1[baseIdx + j] * effH1[j];
+      }
+      rawReceptive[i] = sumPx;
+    }
+  }
+
+  let maxAbsReceptive = 1e-5;
+  for (let i = 0; i < INPUT_SIZE; i++) {
+    const a = Math.abs(rawReceptive[i]);
+    if (a > maxAbsReceptive) maxAbsReceptive = a;
+  }
+
+  const receptiveField = new Array<number>(INPUT_SIZE);
+  const rawAttribution = new Float32Array(INPUT_SIZE);
+  let maxAbsAttr = 1e-5;
+  let excitatoryScore = 0;
+  let inhibitoryScore = 0;
+
+  for (let i = 0; i < INPUT_SIZE; i++) {
+    const normR = Math.max(-1, Math.min(1, rawReceptive[i] / maxAbsReceptive));
+    receptiveField[i] = normR;
+    const px = activations.input[i] ?? 0;
+    const attr = px * normR;
+    rawAttribution[i] = attr;
+    const absA = Math.abs(attr);
+    if (absA > maxAbsAttr) maxAbsAttr = absA;
+    if (attr > 0) excitatoryScore += attr;
+    else inhibitoryScore += Math.abs(attr);
+  }
+
+  const inputAttribution = new Array<number>(INPUT_SIZE);
+  for (let i = 0; i < INPUT_SIZE; i++) {
+    inputAttribution[i] = Math.max(-1, Math.min(1, rawAttribution[i] / maxAbsAttr));
+  }
+
+  return {
+    layerIndex,
+    realIndex,
+    label,
+    receptiveField,
+    inputAttribution,
+    excitatoryScore,
+    inhibitoryScore,
   };
 }
 
