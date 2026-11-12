@@ -38,6 +38,35 @@ export const metadata: Metadata = {
 const themeInitScript = `
 (function() {
   try {
+    var desc = Object.getOwnPropertyDescriptor(window, 'fetch') || Object.getOwnPropertyDescriptor(Window.prototype, 'fetch');
+    if (desc && desc.get && !desc.set && desc.configurable) {
+      var currentFetch = window.fetch;
+      Object.defineProperty(window, 'fetch', {
+        configurable: true,
+        enumerable: true,
+        get: function() { return currentFetch; },
+        set: function(fn) { if (typeof fn === 'function') currentFetch = fn; }
+      });
+    }
+  } catch (e) {}
+
+  try {
+    window.addEventListener('error', function(event) {
+      var msg = (event && event.message) ? String(event.message) : '';
+      var file = (event && event.filename) ? String(event.filename) : '';
+      if (
+        file.indexOf('chrome-extension://') === 0 ||
+        file.indexOf('moz-extension://') === 0 ||
+        msg.indexOf('Cannot set property fetch of #<Window>') !== -1
+      ) {
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        return false;
+      }
+    }, true);
+  } catch (e) {}
+
+  try {
     var stored = localStorage.getItem('neurolab_theme_preference');
     var sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     var mode = (stored === 'dark' || stored === 'light') ? stored : (sysDark ? 'dark' : 'light');

@@ -138,7 +138,7 @@ test('Expanded 1,000-example dataset (800 pretrained + 100 starter + 100 test) a
   );
 
   for (const lookalike of [0, 3, 6, 9]) {
-    for (let v = 0; v < 4; v++) {
+    for (let v = 0; v < 8; v++) {
       const sample = synthesizeHandwrittenDigit(lookalike, {
         thickness: 1.2,
         slant: 0.02,
@@ -152,6 +152,24 @@ test('Expanded 1,000-example dataset (800 pretrained + 100 starter + 100 test) a
       );
     }
   }
+
+  // Verify across all 80 structural archetypes (10 digits x 8 variants)
+  let totalArchetypeCorrect = 0;
+  for (let d = 0; d <= 9; d++) {
+    for (let v = 0; v < 8; v++) {
+      const sample = synthesizeHandwrittenDigit(d, {
+        thickness: 1.18,
+        slant: ((v % 3) - 1) * 0.04,
+        variant: v,
+      });
+      const res = forwardPass(sample, pretrainedModel);
+      if (res.predictedDigit === d) totalArchetypeCorrect++;
+    }
+  }
+  assert.ok(
+    totalArchetypeCorrect >= 77,
+    `Expected >= 77/80 accuracy across all 8 handwriting archetypes per digit, got ${totalArchetypeCorrect}/80`
+  );
 });
 
 test('MNIST 28x28 center-of-mass preprocessing normalizes off-center drawings', () => {

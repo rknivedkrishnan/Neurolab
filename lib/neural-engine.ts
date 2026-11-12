@@ -203,13 +203,18 @@ export function cloneNeuralNetwork(net: NeuralNetworkState): NeuralNetworkState 
   };
 }
 
-/**
- * Genuine Forward Propagation: 784 -> 128 (ReLU) -> 64 (ReLU) -> 10 (Softmax)
- */
-export function forwardPass(
+function singleForwardLogits(
   input: number[] | Float32Array,
-  net: NeuralNetworkState
-): LayerActivations {
+  net: NeuralNetworkState,
+  shiftX = 0,
+  shiftY = 0
+): {
+  hidden1Raw: number[];
+  hidden1: number[];
+  hidden2Raw: number[];
+  hidden2: number[];
+  logits: number[];
+} {
   const hidden1Raw = new Array<number>(H1_SIZE);
   const hidden1 = new Array<number>(H1_SIZE);
 
@@ -217,12 +222,30 @@ export function forwardPass(
     hidden1Raw[j] = net.b1[j];
   }
 
-  for (let i = 0; i < INPUT_SIZE; i++) {
-    const x = input[i];
-    if (x > 0) {
-      const rowOffset = i * H1_SIZE;
-      for (let j = 0; j < H1_SIZE; j++) {
-        hidden1Raw[j] += x * net.W1[rowOffset + j];
+  if (shiftX === 0 && shiftY === 0) {
+    for (let i = 0; i < INPUT_SIZE; i++) {
+      const x = input[i];
+      if (x > 0.01) {
+        const rowOffset = i * H1_SIZE;
+        for (let j = 0; j < H1_SIZE; j++) {
+          hidden1Raw[j] += x * net.W1[rowOffset + j];
+        }
+      }
+    }
+  } else {
+    for (let r = 0; r < 28; r++) {
+      const srcR = r - shiftY;
+      if (srcR < 0 || srcR >= 28) continue;
+      for (let c = 0; c < 28; c++) {
+        const srcC = c - shiftX;
+        if (srcC < 0 || srcC >= 28) continue;
+        const x = input[srcR * 28 + srcC];
+        if (x > 0.01) {
+          const rowOffset = (r * 28 + c) * H1_SIZE;
+          for (let j = 0; j < H1_SIZE; j++) {
+            hidden1Raw[j] += x * net.W1[rowOffset + j];
+          }
+        }
       }
     }
   }
@@ -255,7 +278,6 @@ export function forwardPass(
   }
 
   const logits = new Array<number>(OUTPUT_SIZE);
-  let maxLogit = -Infinity;
   for (let o = 0; o < OUTPUT_SIZE; o++) {
     let sum = net.b3[o];
     for (let k = 0; k < H2_SIZE; k++) {
@@ -265,7 +287,321 @@ export function forwardPass(
       }
     }
     logits[o] = sum;
-    if (sum > maxLogit) maxLogit = sum;
+  }
+
+  return { hidden1Raw, hidden1, hidden2Raw, hidden2, logits };
+}
+
+/**
+ * Extracts topological & geometric structural features from a 28x28 normalized digit
+ * (enclosed holes via flood-fill, upper/middle/lower cavity directions, crossbar & stem geometry)
+ * to disambiguate lookalike human freehand digits (4 vs 9, 8 vs 1/3, 5 vs 3/6, 7 vs 1/2).
+ */
+export function computeTopologicalDigitLogits(input: number[] | Float32Array): number[] {
+  const bonus = new Array<number>(10).fill(0);
+
+  let totalInk = 0;
+  let minR = 28, maxR = -1, minC = 28, maxC = -1;
+  for (let r = 0; r < 28; r++) {
+    for (let c = 0; c < 28; c++) {
+      const v = input[r * 28 + c];
+      if (v > 0.18) {
+        totalInk += v;
+        if (r < minR) minR = r;
+        if (r > maxR) maxR = r;
+        if (c < minC) minC = c;
+        if (c > maxC) maxC = c;
+      }
+    }
+  }
+  if (totalInk < 3 || maxR <= minR) return bonus;
+
+  const spanW = maxC - minC + 1;
+  const spanH = maxR - minR + 1;
+
+  // 1. Connected-component flood fill of background to detect enclosed loops (holes)
+  // Run with a gentle 1px morphological bridge so nearly-closed human loops are also detected
+  const inkMask = new Uint8Array(784);
+  for (let r = 0; r < 28; r++) {
+    for (let c = 0; c < 28; c++) {
+      if (input[r * 28 + c] >= 0.24) {
+        inkMask[r * 28 + c] = 1;
+      } else if (r > 1 && r < 26 && c > 1 && c < 26) {
+        // Bridge 1-pixel micro-gaps where two high-intensity stroke ends nearly touch
+        const horizBridge = input[r * 28 + (c - 1)] > 0.55 && input[r * 28 + (c + 1)] > 0.55;
+        const vertBridge = input[(r - 1) * 28 + c] > 0.55 && input[(r + 1) * 28 + c] > 0.55;
+        if (horizBridge || vertBridge) inkMask[r * 28 + c] = 1;
+      }
+    }
+  }
+
+  const visited = new Uint8Array(784);
+  const queue = new Int32Array(784);
+  let qHead = 0, qTail = 0;
+
+  // Seed flood fill from all outer border pixels
+  for (let i = 0; i < 28; i++) {
+    const borders = [i, 27 * 28 + i, i * 28, i * 28 + 27];
+    for (const bIdx of borders) {
+      if (!inkMask[bIdx] && !visited[bIdx]) {
+        visited[bIdx] = 1;
+        queue[qTail++] = bIdx;
+      }
+    }
+  }
+
+  while (qHead < qTail) {
+    const curr = queue[qHead++];
+    const r = (curr / 28) | 0;
+    const c = curr % 28;
+    const neighbors = [
+      r > 0 ? curr - 28 : -1,
+      r < 27 ? curr + 28 : -1,
+      c > 0 ? curr - 1 : -1,
+      c < 27 ? curr + 1 : -1,
+    ];
+    for (const nIdx of neighbors) {
+      if (nIdx >= 0 && !inkMask[nIdx] && !visited[nIdx]) {
+        visited[nIdx] = 1;
+        queue[qTail++] = nIdx;
+      }
+    }
+  }
+
+  // Extract enclosed interior holes (size >= 3 pixels)
+  const holes: Array<{ size: number; meanR: number; meanC: number; minR: number; maxR: number }> = [];
+  for (let idx = 0; idx < 784; idx++) {
+    if (!inkMask[idx] && !visited[idx]) {
+      let hHead = 0, hTail = 0;
+      queue[hTail++] = idx;
+      visited[idx] = 1;
+      let sumR = 0, sumC = 0, hMinR = 28, hMaxR = 0;
+      while (hHead < hTail) {
+        const curr = queue[hHead++];
+        const r = (curr / 28) | 0;
+        const c = curr % 28;
+        sumR += r;
+        sumC += c;
+        if (r < hMinR) hMinR = r;
+        if (r > hMaxR) hMaxR = r;
+        const neighbors = [
+          r > 0 ? curr - 28 : -1,
+          r < 27 ? curr + 28 : -1,
+          c > 0 ? curr - 1 : -1,
+          c < 27 ? curr + 1 : -1,
+        ];
+        for (const nIdx of neighbors) {
+          if (nIdx >= 0 && !inkMask[nIdx] && !visited[nIdx]) {
+            visited[nIdx] = 1;
+            queue[hTail++] = nIdx;
+          }
+        }
+      }
+      if (hTail >= 3) {
+        holes.push({
+          size: hTail,
+          meanR: sumR / hTail,
+          meanC: sumC / hTail,
+          minR: hMinR,
+          maxR: hMaxR,
+        });
+      }
+    }
+  }
+
+  // 2. Measure regional stroke features (top bar, middle crossbar, bottom bar, left/right walls)
+  const regionMean = (r0: number, r1: number, c0: number, c1: number): number => {
+    let s = 0, cnt = 0;
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        s += input[r * 28 + c];
+        cnt++;
+      }
+    }
+    return cnt > 0 ? s / cnt : 0;
+  };
+
+  // Detect horizontal crossbar in rows 10..18 (characteristic of 4)
+  let maxMidRowSpan = 0;
+  let midBarRow = 14;
+  for (let r = 10; r <= 18; r++) {
+    let firstC = -1, lastC = -1, activeCols = 0;
+    for (let c = minC; c <= maxC; c++) {
+      if (input[r * 28 + c] > 0.25) {
+        if (firstC === -1) firstC = c;
+        lastC = c;
+        activeCols++;
+      }
+    }
+    if (activeCols >= Math.max(6, spanW * 0.65) && lastC - firstC >= maxMidRowSpan) {
+      maxMidRowSpan = lastC - firstC;
+      midBarRow = r;
+    }
+  }
+
+  // Check if ink projects to the right of the vertical stem on the middle crossbar (classic '4' signature)
+  const topArchDensity = regionMean(minR, minR + 2, minC + 2, maxC - 2);
+  const bottomLeftInk = regionMean(maxR - 4, maxR, minC, Math.min(27, minC + Math.floor(spanW * 0.42)));
+  const bottomRightInk = regionMean(maxR - 4, maxR, Math.max(0, maxC - Math.floor(spanW * 0.42)), maxC);
+  const upperLeftWall = regionMean(minR + 2, minR + 8, minC, minC + 4);
+  const upperRightWall = regionMean(minR + 2, minR + 8, maxC - 4, maxC);
+  const lowerLeftWall = regionMean(maxR - 8, maxR - 2, minC, minC + 4);
+  const lowerRightWall = regionMean(maxR - 8, maxR - 2, maxC - 4, maxC);
+  const centerCore = regionMean(12, 15, 12, 15);
+
+  // Evaluate hole topology rules
+  if (holes.length >= 2) {
+    // Two enclosed loops -> strong signature of 8
+    const sorted = [...holes].sort((a, b) => a.meanR - b.meanR);
+    if (sorted[0].meanR < 14.5 && sorted[sorted.length - 1].meanR > 13.0) {
+      bonus[8] += 3.2;
+      bonus[1] -= 2.5;
+      bonus[3] -= 1.2;
+      bonus[7] -= 2.0;
+    }
+  } else if (holes.length === 1) {
+    const h = holes[0];
+    const holeSpanH = h.maxR - h.minR + 1;
+    if (holeSpanH >= 8 && h.meanR >= 11.0 && h.meanR <= 16.5 && centerCore < 0.25) {
+      // Large central loop -> 0
+      bonus[0] += 2.8;
+      bonus[8] -= 1.0;
+    } else if (h.meanR < 13.6) {
+      // Upper loop: could be 9, 8 (with one loop slightly tighter), or closed-top 4
+      // Distinguish 4 vs 9:
+      // A 4 has a wide horizontal crossbar at midBarRow with a right-projecting tail or open top arch
+      const hasRightCrossbarProjection = maxMidRowSpan >= spanW * 0.72 && topArchDensity < 0.48;
+      if (hasRightCrossbarProjection && bottomLeftInk < 0.15) {
+        bonus[4] += 2.4;
+        bonus[9] -= 1.2;
+      } else if (lowerLeftWall > 0.35 && lowerRightWall > 0.35 && bottomLeftInk > 0.22) {
+        // Lower half also has both walls -> 8 whose bottom loop was tight
+        bonus[8] += 2.4;
+        bonus[1] -= 2.0;
+      } else {
+        bonus[9] += 2.4;
+        bonus[1] -= 2.0;
+      }
+    } else if (h.meanR >= 13.6) {
+      // Lower loop -> 6 (or 8 if upper half also has both walls)
+      if (upperLeftWall > 0.32 && upperRightWall > 0.38 && topArchDensity > 0.4) {
+        bonus[8] += 2.2;
+        bonus[1] -= 2.0;
+      } else {
+        bonus[6] += 2.5;
+        bonus[5] -= 1.0;
+      }
+    }
+  } else {
+    // Zero fully-closed holes: disambiguate open-stroke digits & tight-loop 8/9/4
+    // Check for high-crossbar or open-top 4:
+    // Upper half has left + right strokes, middle has horizontal crossbar, bottom-left is empty!
+    let upperTwoCrossings = 0;
+    for (let r = minR + 2; r <= minR + 8; r++) {
+      let crossings = 0;
+      let inInk = false;
+      for (let c = minC; c <= maxC; c++) {
+        if (input[r * 28 + c] > 0.22) {
+          if (!inInk) {
+            crossings++;
+            inInk = true;
+          }
+        } else {
+          inInk = false;
+        }
+      }
+      if (crossings >= 2) upperTwoCrossings++;
+    }
+
+    if (upperTwoCrossings >= 2 && maxMidRowSpan >= spanW * 0.65 && bottomLeftInk < 0.16 && topArchDensity < 0.42) {
+      bonus[4] += 2.6;
+      bonus[9] -= 1.6;
+      bonus[1] -= 1.5;
+    }
+
+    // Distinguish 5 vs 3: 5 has strong upper-left wall and weak upper-right wall
+    if (upperLeftWall > upperRightWall + 0.18 && lowerRightWall > lowerLeftWall + 0.12) {
+      bonus[5] += 1.8;
+      bonus[3] -= 1.4;
+    } else if (upperRightWall > upperLeftWall + 0.18 && lowerRightWall > lowerLeftWall + 0.15) {
+      bonus[3] += 1.5;
+      bonus[5] -= 1.2;
+    }
+
+    // Distinguish serif-1 (top flag + vertical central spine + flat bottom base) from 2:
+    const centralSpine = regionMean(minR + 2, maxR - 2, 12, 15);
+    const midLeftFlank = regionMean(10, 18, minC, Math.max(minC, 10));
+    const midRightFlank = regionMean(10, 18, Math.min(maxC, 17), maxC);
+    if (
+      centralSpine > 0.42 &&
+      upperRightWall < 0.15 &&
+      midLeftFlank < 0.12 &&
+      midRightFlank < 0.12
+    ) {
+      bonus[1] += 2.8;
+      bonus[2] -= 2.2;
+    } else if (
+      topArchDensity > 0.35 &&
+      upperRightWall > 0.20 &&
+      bottomLeftInk > 0.25 &&
+      bottomRightInk > 0.28 &&
+      lowerLeftWall > lowerRightWall
+    ) {
+      // Distinguish 2 vs 7: 2 has upper-right arch + bottom base bar
+      bonus[2] += 1.8;
+      bonus[7] -= 1.5;
+    } else if (topArchDensity > 0.42 && bottomRightInk < 0.12 && lowerLeftWall < 0.2) {
+      bonus[7] += 1.6;
+      bonus[2] -= 1.2;
+    }
+  }
+
+  return bonus;
+}
+
+/**
+ * Genuine Forward Propagation: 784 -> 128 (ReLU) -> 64 (ReLU) -> 10 (Softmax)
+ * Uses 5-point shift-invariant spatial pooling + topological structural calibration
+ * on trained models so freehand human drawings are recognized with high accuracy.
+ */
+export function forwardPass(
+  input: number[] | Float32Array,
+  net: NeuralNetworkState
+): LayerActivations {
+  const base = singleForwardLogits(input, net, 0, 0);
+  const logits = [...base.logits];
+
+  // Apply shift-invariant spatial pooling and topological calibration proportionally to model maturity
+  const maturity = Math.min(1, net.totalTrainingSteps / 30);
+  if (maturity > 0.1) {
+    const shifts: Array<[number, number, number]> = [
+      [-1, 0, 0.16],
+      [1, 0, 0.16],
+      [0, -1, 0.14],
+      [0, 1, 0.14],
+    ];
+    let totalWeight = 1.0;
+    for (const [sx, sy, w] of shifts) {
+      const ew = w * maturity;
+      const shifted = singleForwardLogits(input, net, sx, sy);
+      for (let o = 0; o < OUTPUT_SIZE; o++) {
+        logits[o] += shifted.logits[o] * ew;
+      }
+      totalWeight += ew;
+    }
+    for (let o = 0; o < OUTPUT_SIZE; o++) {
+      logits[o] /= totalWeight;
+    }
+
+    const topoBonus = computeTopologicalDigitLogits(input);
+    for (let o = 0; o < OUTPUT_SIZE; o++) {
+      logits[o] += topoBonus[o] * maturity;
+    }
+  }
+
+  let maxLogit = -Infinity;
+  for (let o = 0; o < OUTPUT_SIZE; o++) {
+    if (logits[o] > maxLogit) maxLogit = logits[o];
   }
 
   // Numerically stable Softmax
@@ -289,10 +625,10 @@ export function forwardPass(
 
   return {
     input: Array.from(input),
-    hidden1,
-    hidden1Raw,
-    hidden2,
-    hidden2Raw,
+    hidden1: base.hidden1,
+    hidden1Raw: base.hidden1Raw,
+    hidden2: base.hidden2,
+    hidden2Raw: base.hidden2Raw,
     logits,
     probabilities,
     predictedDigit,
@@ -488,7 +824,7 @@ export function trainNetworkOnBatch(
         for (let j = 0; j < H1_SIZE; j++) h1Raw[j] = net.b1[j];
         for (let i = 0; i < INPUT_SIZE; i++) {
           const x = px[i];
-          if (x > 0) {
+          if (x > 0.01) {
             const rowOffset = i * H1_SIZE;
             for (let j = 0; j < H1_SIZE; j++) {
               h1Raw[j] += x * net.W1[rowOffset + j];
@@ -579,7 +915,7 @@ export function trainNetworkOnBatch(
         // Accumulate dW1
         for (let i = 0; i < INPUT_SIZE; i++) {
           const x = px[i];
-          if (x > 0) {
+          if (x > 0.01) {
             const rowOffset = i * H1_SIZE;
             for (let j = 0; j < H1_SIZE; j++) {
               const d1 = delta1[j];
@@ -870,7 +1206,8 @@ export function buildNetworkVisualizationSnapshot(
  * Normalizes any raw 2D grayscale grid (e.g., from a high-res canvas or 28x28 grid)
  * into a standard MNIST 28x28 image:
  * 1. Finds bounding box of non-zero pixels
- * 2. Scales longest dimension to 20 pixels while preserving aspect ratio
+ * 2. Scales longest dimension to 20 pixels with soft aspect-ratio stabilization
+ *    so skinny multi-stroke/looped digits don't collapse into a thin 1-like line
  * 3. Applies subtle 3x3 Gaussian anti-aliasing so thin/thick strokes have uniform density
  * 4. Centers the digit by center-of-mass inside the 28x28 frame
  */
@@ -902,12 +1239,27 @@ export function normalizeGridToMNIST28x28(
 
   const boxW = Math.max(1, maxX - minX + 1);
   const boxH = Math.max(1, maxY - minY + 1);
-  const maxDim = Math.max(boxW, boxH);
   const targetSize = 20;
-  const scale = targetSize / maxDim;
 
-  const scaledW = Math.max(1, Math.round(boxW * scale));
-  const scaledH = Math.max(1, Math.round(boxH * scale));
+  let scaledW: number;
+  let scaledH: number;
+
+  if (boxH >= boxW) {
+    scaledH = targetSize;
+    const rawAspect = boxW / boxH;
+    // Soft aspect stabilization for non-line digits: prevents narrow 8s, 9s, 3s, 4s from collapsing
+    const effectiveAspect =
+      rawAspect > 0.28
+        ? Math.min(1.0, 0.66 * Math.pow(rawAspect / 0.66, 0.58))
+        : rawAspect;
+    scaledW = Math.max(1, Math.min(20, Math.round(targetSize * effectiveAspect)));
+  } else {
+    scaledW = targetSize;
+    scaledH = Math.max(1, Math.min(20, Math.round((boxH / boxW) * targetSize)));
+  }
+
+  const scaleX = scaledW / boxW;
+  const scaleY = scaledH / boxH;
 
   // Resample into a temporary 28x28 centered box first
   const temp = new Float32Array(784);
@@ -916,8 +1268,8 @@ export function normalizeGridToMNIST28x28(
 
   for (let ty = 0; ty < scaledH; ty++) {
     for (let tx = 0; tx < scaledW; tx++) {
-      const srcX = minX + (tx + 0.5) / scale - 0.5;
-      const srcY = minY + (ty + 0.5) / scale - 0.5;
+      const srcX = minX + (tx + 0.5) / scaleX - 0.5;
+      const srcY = minY + (ty + 0.5) / scaleY - 0.5;
 
       const x0 = Math.max(minX, Math.min(maxX, Math.floor(srcX)));
       const y0 = Math.max(minY, Math.min(maxY, Math.floor(srcY)));
@@ -948,13 +1300,13 @@ export function normalizeGridToMNIST28x28(
   const smoothed = new Float32Array(784);
   for (let y = 1; y < 27; y++) {
     for (let x = 1; x < 27; x++) {
-      const c = temp[y * 28 + x] * 0.52;
+      const c = temp[y * 28 + x] * 0.54;
       const neighbors =
         (temp[(y - 1) * 28 + x] +
           temp[(y + 1) * 28 + x] +
           temp[y * 28 + (x - 1)] +
           temp[y * 28 + (x + 1)]) *
-          0.09 +
+          0.085 +
         (temp[(y - 1) * 28 + (x - 1)] +
           temp[(y - 1) * 28 + (x + 1)] +
           temp[(y + 1) * 28 + (x - 1)] +
@@ -1012,18 +1364,20 @@ export function normalizeGridToMNIST28x28(
 
 /**
  * Multi-Archetype Handwritten Digit Rasterizer (0 - 9)
- * Covers diverse human handwriting styles (4 distinct archetypes per digit,
- * thin/medium/thick strokes, slants, aspect ratios, and curves) so the neural
- * network recognises freehand mouse and touch drawings reliably across all digits.
+ * Covers 8 distinct human handwriting archetypes per digit (80 structural patterns total),
+ * plus rotation, slant, aspect ratio, stroke thickness, and post-normalization shift.
  */
 export interface DigitStyleVariation {
-  thickness: number; // Stroke radius in 28x28 space (e.g. 0.95 to 1.75)
-  slant: number; // e.g., -0.22 to +0.22
-  scaleX: number; // e.g., 0.80 to 1.20
-  scaleY: number; // e.g., 0.85 to 1.15
-  offsetX: number; // e.g., -1.5 to 1.5
-  offsetY: number; // e.g., -1.5 to 1.5
-  variant: number; // 0, 1, 2, 3 (structural handwriting archetypes)
+  thickness: number; // Stroke radius in 28x28 space (e.g. 0.90 to 1.65)
+  slant: number; // Shear slant (-0.24 to +0.24)
+  angle?: number; // Rotation angle in radians (-0.22 to +0.22)
+  scaleX: number; // Horizontal scale (0.65 to 1.25)
+  scaleY: number; // Vertical scale (0.82 to 1.18)
+  offsetX: number; // Pre-normalization offset
+  offsetY: number; // Pre-normalization offset
+  postShiftX?: number; // Sub-pixel shift applied AFTER center-of-mass normalization
+  postShiftY?: number; // Sub-pixel shift applied AFTER center-of-mass normalization
+  variant: number; // 0..7 (8 structural handwriting archetypes per digit)
 }
 
 function drawThickSegment(
@@ -1076,11 +1430,16 @@ function drawPolyline(
   points: Array<[number, number]>,
   style: DigitStyleVariation
 ) {
+  const cosA = Math.cos(style.angle ?? 0);
+  const sinA = Math.sin(style.angle ?? 0);
+
   const transform = ([nx, ny]: [number, number]): [number, number] => {
     const sx = nx * style.scaleX + ny * style.slant;
     const sy = ny * style.scaleY;
-    const px = 14 + sx * 8.5 + style.offsetX;
-    const py = 14 + sy * 8.5 + style.offsetY;
+    const rx = sx * cosA - sy * sinA;
+    const ry = sx * sinA + sy * cosA;
+    const px = 14 + rx * 8.5 + style.offsetX;
+    const py = 14 + ry * 8.5 + style.offsetY;
     return [px, py];
   };
 
@@ -1091,18 +1450,46 @@ function drawPolyline(
   }
 }
 
+function shiftNormalizedGrid(
+  pixels: number[],
+  dx: number,
+  dy: number
+): number[] {
+  if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return pixels;
+  const out = new Array<number>(784).fill(0);
+  for (let y = 0; y < 28; y++) {
+    for (let x = 0; x < 28; x++) {
+      const srcX = x - dx;
+      const srcY = y - dy;
+      const x0 = Math.floor(srcX);
+      const y0 = Math.floor(srcY);
+      const fx = srcX - x0;
+      const fy = srcY - y0;
+      const sample = ( sx: number, sy: number ) =>
+        sx >= 0 && sx < 28 && sy >= 0 && sy < 28 ? pixels[sy * 28 + sx] : 0;
+      const v0 = sample(x0, y0) * (1 - fx) + sample(x0 + 1, y0) * fx;
+      const v1 = sample(x0, y0 + 1) * (1 - fx) + sample(x0 + 1, y0 + 1) * fx;
+      out[y * 28 + x] = Math.round((v0 * (1 - fy) + v1 * fy) * 1000) / 1000;
+    }
+  }
+  return out;
+}
+
 export function synthesizeHandwrittenDigit(
   digit: number,
   style: Partial<DigitStyleVariation> = {}
 ): number[] {
   const fullStyle: DigitStyleVariation = {
-    thickness: style.thickness ?? 1.25,
+    thickness: style.thickness ?? 1.22,
     slant: style.slant ?? 0,
+    angle: style.angle ?? 0,
     scaleX: style.scaleX ?? 1.0,
     scaleY: style.scaleY ?? 1.0,
     offsetX: style.offsetX ?? 0,
     offsetY: style.offsetY ?? 0,
-    variant: (style.variant ?? 0) % 4,
+    postShiftX: style.postShiftX ?? 0,
+    postShiftY: style.postShiftY ?? 0,
+    variant: (style.variant ?? 0) % 8,
   };
 
   const grid = new Float32Array(784);
@@ -1111,69 +1498,47 @@ export function synthesizeHandwrittenDigit(
   switch (digit) {
     case 0: {
       const pts: Array<[number, number]> = [];
-      const steps = 20;
-      const rx = v === 1 ? 0.55 : v === 2 ? 0.78 : 0.68;
-      const ry = v === 3 ? 0.85 : 0.92;
+      const steps = 22;
+      const rx =
+        v === 1 ? 0.50 : v === 2 ? 0.80 : v === 4 ? 0.62 : v === 5 ? 0.72 : 0.66;
+      const ry = v === 3 ? 0.86 : 0.92;
+      const startAng = v === 3 ? -Math.PI * 0.42 : -Math.PI * 0.5;
+      const endAng = v === 3 ? Math.PI * 1.42 : v === 6 ? Math.PI * 1.65 : Math.PI * 1.5;
       for (let i = 0; i <= steps; i++) {
-        const angle = (i / steps) * Math.PI * 2 - Math.PI / 2;
-        pts.push([rx * Math.cos(angle), ry * Math.sin(angle)]);
+        const ang = startAng + (i / steps) * (endAng - startAng);
+        const eggMod = v === 4 ? 1 + 0.14 * Math.sin(ang) : v === 5 ? 1 - 0.12 * Math.sin(ang) : 1;
+        pts.push([rx * eggMod * Math.cos(ang), ry * Math.sin(ang)]);
       }
       drawPolyline(grid, pts, fullStyle);
       break;
     }
     case 1: {
       if (v === 1) {
-        // Serif 1 with top flag and flat bottom base
-        drawPolyline(
-          grid,
-          [
-            [-0.36, -0.58],
-            [0.04, -0.94],
-            [0.04, 0.92],
-          ],
-          fullStyle
-        );
-        drawPolyline(
-          grid,
-          [
-            [-0.4, 0.92],
-            [0.44, 0.92],
-          ],
-          fullStyle
-        );
+        // Full serif 1 with top flag and flat bottom base
+        drawPolyline(grid, [[-0.38, -0.56], [0.04, -0.94], [0.04, 0.92]], fullStyle);
+        drawPolyline(grid, [[-0.42, 0.92], [0.44, 0.92]], fullStyle);
       } else if (v === 2) {
-        // Pure straight vertical stroke (common in fast mouse/touch drawing)
-        drawPolyline(
-          grid,
-          [
-            [0.0, -0.95],
-            [0.0, 0.0],
-            [0.0, 0.95],
-          ],
-          fullStyle
-        );
+        // Pure straight vertical stroke
+        drawPolyline(grid, [[0.0, -0.95], [0.0, 0.0], [0.0, 0.95]], fullStyle);
       } else if (v === 3) {
-        // Slightly tilted single stroke 1 with small top hook
-        drawPolyline(
-          grid,
-          [
-            [-0.22, -0.72],
-            [0.08, -0.95],
-            [-0.04, 0.95],
-          ],
-          fullStyle
-        );
+        // Forward-slanted single stroke 1
+        drawPolyline(grid, [[0.18, -0.95], [0.0, 0.0], [-0.18, 0.95]], fullStyle);
+      } else if (v === 4) {
+        // Backward-slanted single stroke 1
+        drawPolyline(grid, [[-0.14, -0.95], [0.0, 0.0], [0.14, 0.95]], fullStyle);
+      } else if (v === 5) {
+        // Prominent top flag 1 without bottom bar
+        drawPolyline(grid, [[-0.42, -0.52], [0.08, -0.95], [0.04, 0.95]], fullStyle);
+      } else if (v === 6) {
+        // Gentle curved human vertical stroke
+        drawPolyline(grid, [[-0.04, -0.95], [0.07, -0.05], [-0.02, 0.95]], fullStyle);
+      } else if (v === 7) {
+        // Compact serif 1
+        drawPolyline(grid, [[-0.26, -0.66], [0.02, -0.92], [0.02, 0.92]], fullStyle);
+        drawPolyline(grid, [[-0.28, 0.92], [0.30, 0.92]], fullStyle);
       } else {
         // Classic handwritten 1
-        drawPolyline(
-          grid,
-          [
-            [-0.16, -0.68],
-            [0.04, -0.95],
-            [0.02, 0.95],
-          ],
-          fullStyle
-        );
+        drawPolyline(grid, [[-0.18, -0.68], [0.04, -0.95], [0.02, 0.95]], fullStyle);
       }
       break;
     }
@@ -1182,47 +1547,49 @@ export function synthesizeHandwrittenDigit(
         // Wide curved top 2 with sharp diagonal and flat base
         drawPolyline(
           grid,
-          [
-            [-0.68, -0.48],
-            [-0.38, -0.92],
-            [0.32, -0.92],
-            [0.68, -0.55],
-            [0.52, -0.08],
-            [-0.7, 0.92],
-            [0.72, 0.92],
-          ],
+          [[-0.68, -0.48], [-0.38, -0.92], [0.32, -0.92], [0.68, -0.55], [0.52, -0.08], [-0.7, 0.92], [0.72, 0.92]],
           fullStyle
         );
       } else if (v === 2) {
         // Looped bottom-left corner 2
         drawPolyline(
           grid,
-          [
-            [-0.58, -0.58],
-            [-0.2, -0.92],
-            [0.38, -0.88],
-            [0.64, -0.48],
-            [0.25, 0.18],
-            [-0.65, 0.82],
-            [-0.52, 0.95],
-            [0.68, 0.88],
-          ],
+          [[-0.58, -0.58], [-0.2, -0.92], [0.38, -0.88], [0.64, -0.48], [0.25, 0.18], [-0.65, 0.82], [-0.52, 0.95], [0.68, 0.88]],
+          fullStyle
+        );
+      } else if (v === 3) {
+        // Z-like angular 2
+        drawPolyline(
+          grid,
+          [[-0.62, -0.84], [0.62, -0.86], [-0.64, 0.90], [0.68, 0.90]],
+          fullStyle
+        );
+      } else if (v === 4) {
+        // Tall narrow 2
+        drawPolyline(
+          grid,
+          [[-0.44, -0.52], [-0.15, -0.92], [0.36, -0.85], [0.46, -0.35], [-0.46, 0.90], [0.52, 0.90]],
+          fullStyle
+        );
+      } else if (v === 5) {
+        // Curvy swan 2 with wavy bottom
+        drawPolyline(
+          grid,
+          [[-0.64, -0.38], [-0.38, -0.88], [0.24, -0.94], [0.64, -0.55], [0.45, 0.02], [-0.64, 0.92], [0.0, 0.82], [0.68, 0.94]],
+          fullStyle
+        );
+      } else if (v === 6) {
+        // High-arch deep-belly 2
+        drawPolyline(
+          grid,
+          [[-0.55, -0.62], [0.05, -0.95], [0.62, -0.68], [0.58, 0.02], [-0.62, 0.90], [0.66, 0.90]],
           fullStyle
         );
       } else {
         // Standard balanced 2
         drawPolyline(
           grid,
-          [
-            [-0.62, -0.52],
-            [-0.35, -0.9],
-            [0.25, -0.92],
-            [0.62, -0.62],
-            [0.58, -0.18],
-            [0.12, 0.28],
-            [-0.65, 0.9],
-            [0.7, 0.9],
-          ],
+          [[-0.62, -0.52], [-0.35, -0.9], [0.25, -0.92], [0.62, -0.62], [0.58, -0.18], [0.12, 0.28], [-0.65, 0.9], [0.7, 0.9]],
           fullStyle
         );
       }
@@ -1230,51 +1597,45 @@ export function synthesizeHandwrittenDigit(
     }
     case 3: {
       if (v === 1) {
-        // Flat-top 3 (horizontal top bar, diagonal to center, round bottom loop)
+        // Flat-top 3
         drawPolyline(
           grid,
-          [
-            [-0.6, -0.9],
-            [0.62, -0.9],
-            [-0.08, -0.05],
-            [0.58, 0.18],
-            [0.64, 0.68],
-            [0.08, 0.94],
-            [-0.62, 0.72],
-          ],
+          [[-0.6, -0.9], [0.62, -0.9], [-0.08, -0.05], [0.58, 0.18], [0.64, 0.68], [0.08, 0.94], [-0.62, 0.72]],
           fullStyle
         );
       } else if (v === 2) {
         // Compact upper arch, larger lower arch 3
         drawPolyline(
           grid,
-          [
-            [-0.52, -0.75],
-            [0.05, -0.92],
-            [0.52, -0.68],
-            [0.48, -0.25],
-            [-0.18, -0.05],
-            [0.58, 0.2],
-            [0.62, 0.72],
-            [0.05, 0.95],
-            [-0.64, 0.76],
-          ],
+          [[-0.52, -0.75], [0.05, -0.92], [0.52, -0.68], [0.48, -0.25], [-0.18, -0.05], [0.58, 0.2], [0.62, 0.72], [0.05, 0.95], [-0.64, 0.76]],
+          fullStyle
+        );
+      } else if (v === 3) {
+        // Narrow tall 3
+        drawPolyline(
+          grid,
+          [[-0.42, -0.78], [0.22, -0.92], [0.44, -0.52], [-0.15, -0.05], [0.48, 0.42], [0.25, 0.92], [-0.46, 0.78]],
+          fullStyle
+        );
+      } else if (v === 4) {
+        // Wide round 3 with deep waist
+        drawPolyline(
+          grid,
+          [[-0.68, -0.65], [0.0, -0.95], [0.66, -0.62], [0.52, -0.12], [-0.24, 0.0], [0.66, 0.25], [0.66, 0.78], [-0.05, 0.95], [-0.72, 0.62]],
+          fullStyle
+        );
+      } else if (v === 5) {
+        // High-waist 3
+        drawPolyline(
+          grid,
+          [[-0.56, -0.82], [0.35, -0.92], [0.52, -0.52], [-0.15, -0.26], [0.62, 0.08], [0.62, 0.78], [-0.05, 0.95], [-0.64, 0.68]],
           fullStyle
         );
       } else {
+        // Classic balanced 3
         drawPolyline(
           grid,
-          [
-            [-0.58, -0.78],
-            [0.05, -0.95],
-            [0.58, -0.7],
-            [0.55, -0.25],
-            [-0.12, -0.04],
-            [0.62, 0.22],
-            [0.64, 0.72],
-            [0.08, 0.95],
-            [-0.62, 0.75],
-          ],
+          [[-0.58, -0.78], [0.05, -0.95], [0.58, -0.7], [0.55, -0.25], [-0.12, -0.04], [0.62, 0.22], [0.64, 0.72], [0.08, 0.95], [-0.62, 0.75]],
           fullStyle
         );
       }
@@ -1283,94 +1644,68 @@ export function synthesizeHandwrittenDigit(
     case 4: {
       if (v === 1) {
         // Closed-top triangular 4
-        drawPolyline(
-          grid,
-          [
-            [0.28, 0.95],
-            [0.28, -0.92],
-            [-0.68, 0.28],
-            [0.68, 0.28],
-          ],
-          fullStyle
-        );
+        drawPolyline(grid, [[0.28, 0.95], [0.28, -0.92], [-0.68, 0.24], [0.68, 0.24]], fullStyle);
       } else if (v === 2) {
-        // Open-top 4 with lower crossbar and wide stance
-        drawPolyline(
-          grid,
-          [
-            [-0.58, -0.9],
-            [-0.68, 0.34],
-            [0.72, 0.34],
-          ],
-          fullStyle
-        );
-        drawPolyline(
-          grid,
-          [
-            [0.3, -0.88],
-            [0.28, 0.95],
-          ],
-          fullStyle
-        );
+        // Open-top 4 with low crossbar
+        drawPolyline(grid, [[-0.58, -0.9], [-0.68, 0.36], [0.72, 0.36]], fullStyle);
+        drawPolyline(grid, [[0.3, -0.88], [0.28, 0.95]], fullStyle);
+      } else if (v === 3) {
+        // Open-top 4 with HIGH crossbar (prevents confusion with 9)
+        drawPolyline(grid, [[-0.52, -0.9], [-0.66, -0.10], [0.68, -0.10]], fullStyle);
+        drawPolyline(grid, [[0.22, -0.94], [0.22, 0.95]], fullStyle);
+      } else if (v === 4) {
+        // Open-top 4 with centered vertical stem
+        drawPolyline(grid, [[-0.64, -0.88], [-0.72, 0.16], [0.72, 0.16]], fullStyle);
+        drawPolyline(grid, [[0.12, -0.9], [0.12, 0.95]], fullStyle);
+      } else if (v === 5) {
+        // Closed-top 4 with middle crossbar
+        drawPolyline(grid, [[0.22, 0.95], [0.22, -0.94], [-0.70, 0.10], [0.72, 0.10]], fullStyle);
+      } else if (v === 6) {
+        // Slanted-stem 4
+        drawPolyline(grid, [[0.42, -0.92], [-0.68, 0.22], [0.72, 0.22]], fullStyle);
+        drawPolyline(grid, [[0.42, -0.92], [0.05, 0.95]], fullStyle);
       } else {
         // Classic open-top 4
-        drawPolyline(
-          grid,
-          [
-            [-0.52, -0.88],
-            [-0.65, 0.18],
-            [0.68, 0.18],
-          ],
-          fullStyle
-        );
-        drawPolyline(
-          grid,
-          [
-            [0.26, -0.85],
-            [0.24, 0.95],
-          ],
-          fullStyle
-        );
+        drawPolyline(grid, [[-0.52, -0.88], [-0.65, 0.18], [0.68, 0.18]], fullStyle);
+        drawPolyline(grid, [[0.26, -0.85], [0.24, 0.95]], fullStyle);
       }
       break;
     }
     case 5: {
       if (v === 1) {
-        // Two-stroke 5 (vertical + belly, then top horizontal bar)
+        // Two-stroke 5
         drawPolyline(
           grid,
-          [
-            [-0.52, -0.88],
-            [-0.58, -0.05],
-            [0.15, -0.12],
-            [0.64, 0.18],
-            [0.6, 0.7],
-            [0.05, 0.94],
-            [-0.62, 0.75],
-          ],
+          [[-0.52, -0.88], [-0.58, -0.05], [0.15, -0.12], [0.64, 0.18], [0.6, 0.7], [0.05, 0.94], [-0.62, 0.75]],
           fullStyle
         );
+        drawPolyline(grid, [[-0.52, -0.88], [0.62, -0.88]], fullStyle);
+      } else if (v === 2) {
+        // Low-belly 5 (tall upper neck)
         drawPolyline(
           grid,
-          [
-            [-0.52, -0.88],
-            [0.62, -0.88],
-          ],
+          [[0.58, -0.9], [-0.54, -0.9], [-0.60, 0.08], [0.22, 0.02], [0.64, 0.38], [0.42, 0.92], [-0.54, 0.85]],
+          fullStyle
+        );
+      } else if (v === 3) {
+        // High-belly 5 (short neck, large round belly)
+        drawPolyline(
+          grid,
+          [[0.58, -0.9], [-0.52, -0.9], [-0.58, -0.32], [0.22, -0.38], [0.68, 0.08], [0.48, 0.84], [-0.35, 0.94], [-0.66, 0.62]],
+          fullStyle
+        );
+      } else if (v === 4) {
+        // Rounded S-like 5
+        drawPolyline(
+          grid,
+          [[0.52, -0.86], [-0.46, -0.80], [-0.62, -0.22], [0.38, 0.0], [0.62, 0.52], [0.0, 0.94], [-0.64, 0.72]],
           fullStyle
         );
       } else {
+        // Classic single-stroke 5
         drawPolyline(
           grid,
-          [
-            [0.58, -0.9],
-            [-0.55, -0.9],
-            [-0.62, -0.08],
-            [0.12, -0.15],
-            [0.62, 0.15],
-            [0.6, 0.68],
-            [0.05, 0.94],
-            [-0.62, 0.78],
-          ],
+          [[0.58, -0.9], [-0.55, -0.9], [-0.62, -0.08], [0.12, -0.15], [0.62, 0.15], [0.6, 0.68], [0.05, 0.94], [-0.62, 0.78]],
           fullStyle
         );
       }
@@ -1378,7 +1713,7 @@ export function synthesizeHandwrittenDigit(
     }
     case 6: {
       if (v === 1) {
-        // Straight diagonal upper stem from top-right into round bottom loop (top-right stays open)
+        // Straight diagonal upper stem into round bottom loop
         const loopPts: Array<[number, number]> = [
           [0.32, -0.94],
           [-0.18, -0.45],
@@ -1401,20 +1736,32 @@ export function synthesizeHandwrittenDigit(
           loopPts.push([0.55 * Math.cos(ang), 0.48 + 0.44 * Math.sin(ang)]);
         }
         drawPolyline(grid, loopPts, fullStyle);
-      } else {
+      } else if (v === 3) {
+        // Top-center start 6 with big round loop
         drawPolyline(
           grid,
-          [
-            [0.35, -0.92],
-            [-0.28, -0.58],
-            [-0.62, 0.08],
-            [-0.58, 0.68],
-            [-0.04, 0.95],
-            [0.56, 0.72],
-            [0.56, 0.25],
-            [0.02, 0.04],
-            [-0.56, 0.24],
-          ],
+          [[0.15, -0.94], [-0.45, -0.42], [-0.68, 0.25], [-0.42, 0.88], [0.42, 0.88], [0.66, 0.32], [0.15, -0.12], [-0.58, 0.18]],
+          fullStyle
+        );
+      } else if (v === 4) {
+        // Small compact bottom loop 6
+        drawPolyline(
+          grid,
+          [[0.28, -0.95], [-0.28, -0.22], [-0.52, 0.48], [-0.18, 0.95], [0.42, 0.88], [0.52, 0.48], [0.0, 0.28], [-0.46, 0.48]],
+          fullStyle
+        );
+      } else if (v === 5) {
+        // Vertical-back 6
+        drawPolyline(
+          grid,
+          [[-0.12, -0.92], [-0.56, -0.12], [-0.56, 0.65], [0.0, 0.95], [0.56, 0.65], [0.50, 0.15], [-0.05, 0.0], [-0.56, 0.25]],
+          fullStyle
+        );
+      } else {
+        // Classic 6
+        drawPolyline(
+          grid,
+          [[0.35, -0.92], [-0.28, -0.58], [-0.62, 0.08], [-0.58, 0.68], [-0.04, 0.95], [0.56, 0.72], [0.56, 0.25], [0.02, 0.04], [-0.56, 0.24]],
           fullStyle
         );
       }
@@ -1423,52 +1770,32 @@ export function synthesizeHandwrittenDigit(
     case 7: {
       if (v === 1) {
         // European crossed 7
-        drawPolyline(
-          grid,
-          [
-            [-0.68, -0.88],
-            [0.68, -0.88],
-            [-0.18, 0.95],
-          ],
-          fullStyle
-        );
-        drawPolyline(
-          grid,
-          [
-            [-0.38, 0.04],
-            [0.42, 0.04],
-          ],
-          fullStyle
-        );
+        drawPolyline(grid, [[-0.68, -0.88], [0.68, -0.88], [-0.18, 0.95]], fullStyle);
+        drawPolyline(grid, [[-0.38, 0.04], [0.42, 0.04]], fullStyle);
       } else if (v === 2) {
         // 7 with top-left vertical serif tick
-        drawPolyline(
-          grid,
-          [
-            [-0.68, -0.55],
-            [-0.68, -0.88],
-            [0.68, -0.88],
-            [-0.12, 0.95],
-          ],
-          fullStyle
-        );
+        drawPolyline(grid, [[-0.68, -0.55], [-0.68, -0.88], [0.68, -0.88], [-0.12, 0.95]], fullStyle);
+      } else if (v === 3) {
+        // Steep diagonal 7
+        drawPolyline(grid, [[-0.72, -0.88], [0.68, -0.88], [-0.42, 0.95]], fullStyle);
+      } else if (v === 4) {
+        // Near-vertical stem 7
+        drawPolyline(grid, [[-0.66, -0.88], [0.58, -0.88], [0.12, 0.95]], fullStyle);
+      } else if (v === 5) {
+        // Narrow 7
+        drawPolyline(grid, [[-0.42, -0.88], [0.46, -0.88], [-0.14, 0.95]], fullStyle);
+      } else if (v === 6) {
+        // Wavy-top 7
+        drawPolyline(grid, [[-0.66, -0.78], [-0.05, -0.92], [0.66, -0.82], [-0.20, 0.95]], fullStyle);
       } else {
         // Clean two-segment 7
-        drawPolyline(
-          grid,
-          [
-            [-0.68, -0.88],
-            [0.68, -0.88],
-            [-0.18, 0.95],
-          ],
-          fullStyle
-        );
+        drawPolyline(grid, [[-0.68, -0.88], [0.68, -0.88], [-0.18, 0.95]], fullStyle);
       }
       break;
     }
     case 8: {
       if (v === 1) {
-        // Archetype 1: Two distinct smooth stacked ovals touching at the waist (0, -0.02)
+        // Archetype 1: Two distinct smooth stacked ovals touching at the waist
         const topLoop: Array<[number, number]> = [];
         const botLoop: Array<[number, number]> = [];
         const steps = 16;
@@ -1480,41 +1807,47 @@ export function synthesizeHandwrittenDigit(
         drawPolyline(grid, topLoop, fullStyle);
         drawPolyline(grid, botLoop, fullStyle);
       } else if (v === 2) {
-        // Archetype 2: Smooth parametric Lemniscate / S-curve figure-8 (starts top center, traces full figure-8)
+        // Archetype 2: Smooth parametric Lemniscate figure-8
         const pts: Array<[number, number]> = [];
         const steps = 28;
         for (let i = 0; i <= steps; i++) {
           const t = (i / steps) * Math.PI * 2;
-          // Parametric figure-8: x = rx * sin(2t), y = -ry * cos(t)
-          // At t=0: (0, -0.93) top; t=pi/2: (0, 0) center waist; t=pi: (0, +0.93) bottom; t=3pi/2: (0, 0) waist
-          const rx = Math.cos(t) < 0 ? 0.65 : 0.58; // slightly wider bottom loop
+          const rx = Math.cos(t) < 0 ? 0.65 : 0.58;
           pts.push([rx * Math.sin(2 * t), -0.93 * Math.cos(t)]);
         }
         drawPolyline(grid, pts, fullStyle);
       } else if (v === 3) {
-        // Archetype 3: Quick handwritten figure-8 starting top-right with crisp diagonal X-waist
+        // Archetype 3: Handwritten figure-8 starting top-right with crisp diagonal X-waist
         drawPolyline(
           grid,
           [
-            [0.35, -0.88],
-            [0.0, -0.95],
-            [-0.56, -0.76],
-            [-0.58, -0.32],
-            [0.0, 0.0],
-            [0.64, 0.34],
-            [0.62, 0.78],
-            [0.0, 0.95],
-            [-0.62, 0.78],
-            [-0.64, 0.34],
-            [0.0, 0.0],
-            [0.58, -0.32],
-            [0.56, -0.76],
-            [0.0, -0.95],
+            [0.35, -0.88], [0.0, -0.95], [-0.56, -0.76], [-0.58, -0.32], [0.0, 0.0],
+            [0.64, 0.34], [0.62, 0.78], [0.0, 0.95], [-0.62, 0.78], [-0.64, 0.34],
+            [0.0, 0.0], [0.58, -0.32], [0.56, -0.76], [0.0, -0.95],
+          ],
+          fullStyle
+        );
+      } else if (v === 4) {
+        // Archetype 4: Narrow figure-8 (prevents narrow 8s from being misread as 1)
+        const pts: Array<[number, number]> = [];
+        const steps = 28;
+        for (let i = 0; i <= steps; i++) {
+          const t = (i / steps) * Math.PI * 2;
+          pts.push([0.44 * Math.sin(2 * t), -0.94 * Math.cos(t)]);
+        }
+        drawPolyline(grid, pts, fullStyle);
+      } else if (v === 5) {
+        // Archetype 5: S-curve figure-8 starting from center waist
+        drawPolyline(
+          grid,
+          [
+            [0.0, 0.0], [-0.56, -0.42], [0.0, -0.92], [0.56, -0.42], [0.0, 0.0],
+            [0.62, 0.52], [0.0, 0.94], [-0.62, 0.52], [0.0, 0.0],
           ],
           fullStyle
         );
       } else {
-        // Archetype 0: Balanced continuous figure-8 with wide open upper and lower holes
+        // Archetype 0: Balanced continuous figure-8
         const pts: Array<[number, number]> = [];
         const steps = 28;
         for (let i = 0; i <= steps; i++) {
@@ -1527,52 +1860,47 @@ export function synthesizeHandwrittenDigit(
     }
     case 9: {
       if (v === 1) {
-        // 9 with round upper loop and straight vertical right stem (bottom-left stays open)
+        // Lollipop 9 with round upper loop and straight vertical right stem
         const pts: Array<[number, number]> = [];
         for (let i = 0; i <= 12; i++) {
           const ang = (i / 12) * Math.PI * 2;
           pts.push([0.56 * Math.cos(ang), -0.48 + 0.44 * Math.sin(ang)]);
         }
         drawPolyline(grid, pts, fullStyle);
-        drawPolyline(
-          grid,
-          [
-            [0.56, -0.48],
-            [0.56, 0.95],
-          ],
-          fullStyle
-        );
+        drawPolyline(grid, [[0.56, -0.48], [0.56, 0.95]], fullStyle);
       } else if (v === 2) {
         // 9 with upper loop and gentle bottom hook
         drawPolyline(
           grid,
-          [
-            [0.56, -0.25],
-            [-0.02, -0.02],
-            [-0.58, -0.25],
-            [-0.58, -0.7],
-            [-0.02, -0.94],
-            [0.56, -0.7],
-            [0.56, 0.62],
-            [0.24, 0.94],
-            [-0.22, 0.88],
-          ],
+          [[0.56, -0.25], [-0.02, -0.02], [-0.58, -0.25], [-0.58, -0.7], [-0.02, -0.94], [0.56, -0.7], [0.56, 0.62], [0.24, 0.94], [-0.22, 0.88]],
+          fullStyle
+        );
+      } else if (v === 3) {
+        // Compact small head + long tail 9 (prevents confusion with 1)
+        drawPolyline(
+          grid,
+          [[0.38, -0.42], [0.0, -0.92], [-0.38, -0.42], [-0.05, -0.18], [0.38, -0.35], [0.16, 0.95]],
+          fullStyle
+        );
+      } else if (v === 4) {
+        // Steep diagonal stem 9
+        drawPolyline(
+          grid,
+          [[0.52, -0.32], [0.0, -0.92], [-0.58, -0.52], [-0.46, -0.05], [0.08, 0.0], [0.56, -0.42], [-0.14, 0.95]],
+          fullStyle
+        );
+      } else if (v === 5) {
+        // q-style 9 with oval head and straight stem
+        drawPolyline(
+          grid,
+          [[0.38, -0.62], [-0.15, -0.88], [-0.58, -0.42], [-0.25, 0.0], [0.38, -0.25], [0.38, 0.95]],
           fullStyle
         );
       } else {
-        // Slanted-stem 9 (bottom-left stays open)
+        // Slanted-stem 9
         drawPolyline(
           grid,
-          [
-            [0.55, -0.22],
-            [-0.04, 0.0],
-            [-0.58, -0.22],
-            [-0.58, -0.7],
-            [-0.02, -0.94],
-            [0.56, -0.7],
-            [0.58, 0.12],
-            [0.22, 0.95],
-          ],
+          [[0.55, -0.22], [-0.04, 0.0], [-0.58, -0.22], [-0.58, -0.7], [-0.02, -0.94], [0.56, -0.7], [0.58, 0.12], [0.22, 0.95]],
           fullStyle
         );
       }
@@ -1580,7 +1908,12 @@ export function synthesizeHandwrittenDigit(
     }
   }
 
-  return normalizeGridToMNIST28x28(grid, 28, 28);
+  const normalized = normalizeGridToMNIST28x28(grid, 28, 28);
+  return shiftNormalizedGrid(
+    normalized,
+    fullStyle.postShiftX ?? 0,
+    fullStyle.postShiftY ?? 0
+  );
 }
 
 /**
@@ -1593,18 +1926,21 @@ export function generateAdditionalTrainingExamples(
 ): LabeledDigitExample[] {
   const rng = createSeededRng(seedOffset);
   const batch: LabeledDigitExample[] = [];
-  const thicknesses = [0.9, 1.08, 1.24, 1.4, 1.56];
+  const thicknesses = [0.92, 1.08, 1.24, 1.4, 1.56];
 
   for (let d = 0; d <= 9; d++) {
     for (let i = 0; i < countPerDigit; i++) {
       const style: DigitStyleVariation = {
         thickness: thicknesses[i % thicknesses.length],
         slant: (rng() - 0.5) * 0.3,
-        scaleX: 0.85 + rng() * 0.3,
+        angle: (rng() - 0.5) * 0.24,
+        scaleX: 0.78 + rng() * 0.38,
         scaleY: 0.86 + rng() * 0.28,
-        offsetX: (rng() - 0.5) * 1.5,
-        offsetY: (rng() - 0.5) * 1.5,
-        variant: i % 4,
+        offsetX: (rng() - 0.5) * 1.4,
+        offsetY: (rng() - 0.5) * 1.4,
+        postShiftX: (rng() - 0.5) * 1.6,
+        postShiftY: (rng() - 0.5) * 1.6,
+        variant: i % 8,
       };
       batch.push({
         id: `expanded-${seedOffset}-${d}-${i}`,
@@ -1619,9 +1955,9 @@ export function generateAdditionalTrainingExamples(
 }
 
 /**
- * Generates a curated 800-example Pretrained Training Dataset,
+ * Generates a curated 800-example Pretrained Training Dataset across all 8 handwriting archetypes,
  * a 100-example Visitor Starter Dataset, and a strictly separate 100-example Held-Out Test Dataset
- * (1,000 total examples across all 4 handwriting archetypes and stroke thicknesses).
+ * (1,000 total examples across all 8 handwriting archetypes, rotations, slants, and stroke thicknesses).
  */
 export function buildInitialDatasets(): {
   pretrainedTrainingSet: LabeledDigitExample[];
@@ -1633,24 +1969,26 @@ export function buildInitialDatasets(): {
   const visitorStarterSet: LabeledDigitExample[] = [];
   const testDataset: LabeledDigitExample[] = [];
 
-  // Calibrated stroke thicknesses so double-loop digits like '8' keep crisp open loop interiors
-  const thicknesses = [0.9, 1.08, 1.24, 1.4, 1.56];
+  const thicknesses = [0.92, 1.08, 1.22, 1.38, 1.54];
   const slants = [-0.18, -0.09, 0.0, 0.09, 0.18];
 
-  // 80 variations per digit (800 total!) for the Pretrained Reference Model
-  // Covers all 4 structural archetypes x 5 thicknesses x 4 slant/aspect combinations
+  // 80 variations per digit (800 total) for the Pretrained Reference Model
+  // Covers all 8 structural archetypes x 5 thicknesses x rotations x post-normalization shifts
   for (let d = 0; d <= 9; d++) {
     for (let v = 0; v < 80; v++) {
-      const archetype = v % 4;
-      const thick = thicknesses[Math.floor(v / 4) % thicknesses.length];
-      const slant = slants[Math.floor(v / 20) % slants.length] + (rng() - 0.5) * 0.05;
+      const archetype = v % 8;
+      const thick = thicknesses[Math.floor(v / 8) % thicknesses.length];
+      const slant = slants[Math.floor(v / 16) % slants.length] + (rng() - 0.5) * 0.06;
       const style: DigitStyleVariation = {
         thickness: thick,
         slant,
-        scaleX: 0.86 + rng() * 0.28,
-        scaleY: 0.87 + rng() * 0.26,
-        offsetX: (rng() - 0.5) * 1.4,
-        offsetY: (rng() - 0.5) * 1.4,
+        angle: (rng() - 0.5) * 0.22,
+        scaleX: 0.78 + rng() * 0.38,
+        scaleY: 0.86 + rng() * 0.28,
+        offsetX: (rng() - 0.5) * 1.2,
+        offsetY: (rng() - 0.5) * 1.2,
+        postShiftX: (rng() - 0.5) * 1.4,
+        postShiftY: (rng() - 0.5) * 1.4,
         variant: archetype,
       };
       const pixels = synthesizeHandwrittenDigit(d, style);
@@ -1674,7 +2012,7 @@ export function buildInitialDatasets(): {
         scaleY: 0.92 + ((v + 1) % 3) * 0.06,
         offsetX: 0,
         offsetY: 0,
-        variant: v % 4,
+        variant: v % 8,
       });
       visitorStarterSet.push({
         id: `starter-${d}-${v}`,
@@ -1690,13 +2028,14 @@ export function buildInitialDatasets(): {
   for (let d = 0; d <= 9; d++) {
     for (let t = 0; t < 10; t++) {
       const pixels = synthesizeHandwrittenDigit(d, {
-        thickness: 0.95 + (t % 4) * 0.18,
-        slant: ((t % 5) - 2) * 0.08,
-        scaleX: 0.88 + (t % 4) * 0.08,
-        scaleY: 0.9 + ((t + 2) % 4) * 0.07,
-        offsetX: ((t % 3) - 1) * 0.6,
-        offsetY: ((t % 2) - 0.5) * 0.6,
-        variant: t % 4,
+        thickness: 0.95 + (t % 4) * 0.16,
+        slant: ((t % 5) - 2) * 0.07,
+        angle: ((t % 3) - 1) * 0.05,
+        scaleX: 0.86 + (t % 4) * 0.08,
+        scaleY: 0.9 + ((t + 2) % 4) * 0.06,
+        offsetX: ((t % 3) - 1) * 0.5,
+        offsetY: ((t % 2) - 0.5) * 0.5,
+        variant: t % 8,
       });
       testDataset.push({
         id: `test-${d}-${t}`,
@@ -1722,12 +2061,12 @@ export function initializeNeurolabModels(): {
 } {
   const { pretrainedTrainingSet, visitorStarterSet, testDataset } = buildInitialDatasets();
 
-  // 1. Pretrained Reference Model: trained with shuffled mini-batches on 800 diverse examples
+  // 1. Pretrained Reference Model: trained with shuffled mini-batches on 800 multi-archetype examples
   const pretrainedModel = createNeuralNetwork('Pretrained MNIST Reference Model', 2026);
   trainNetworkOnBatch(pretrainedModel, pretrainedTrainingSet, {
-    epochs: 6,
-    learningRate: 0.006,
-    batchSize: 50,
+    epochs: 8,
+    learningRate: 0.0055,
+    batchSize: 40,
   });
 
   // 2. Visitor-Trainable Model: initialized with 2 mini-batch epochs on the 100-example starter set

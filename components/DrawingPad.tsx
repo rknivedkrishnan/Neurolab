@@ -148,8 +148,8 @@ export default function DrawingPad({
         if (pt.y > maxY) maxY = pt.y;
       }
     }
-    const span = Math.max(55, maxX - minX, maxY - minY);
-    const adaptiveLineWidth = Math.max(10, Math.min(22, span * 0.115));
+    const span = Math.max(48, maxX - minX, maxY - minY);
+    const adaptiveLineWidth = Math.max(6, span * 0.112);
 
     const scale = 56 / CANVAS_SIZE;
     ctx.strokeStyle = '#000000';
@@ -271,9 +271,9 @@ export default function DrawingPad({
     sampleVariationRef.current += 1;
     const v = sampleVariationRef.current;
     const sample = synthesizeHandwrittenDigit(digit, {
-      thickness: 1.3,
+      thickness: 1.25,
       slant: ((v % 5) - 2) * 0.04,
-      variant: v % 4,
+      variant: v % 8,
     });
     onPixelsChange(sample, true);
   };
